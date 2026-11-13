@@ -3,9 +3,9 @@ import type { Role, Room } from "../../types"
 import { formatDate } from "../../utils/formatDate"
 import { Icon } from "../ui/Icon"
 
-type Props = { room: Room; role?: Role }
+type Props = { room: Room; role?: Role; members?: number }
 
-export function RoomCard({ room, role }: Props) {
+export function RoomCard({ room, role, members }: Props) {
   return (
     <Link
       to={`/salas/${room.id}`}
@@ -23,7 +23,10 @@ export function RoomCard({ room, role }: Props) {
         )}
       </div>
       <div className="flex items-center justify-between text-sm text-ink/70">
-        <span>Creada el {formatDate(room.createdAt)}</span>
+        <span>
+          Creada el {formatDate(room.createdAt)}
+          {members !== undefined && ` · ${members} ${members === 1 ? "integrante" : "integrantes"}`}
+        </span>
         {role === "host" && (
           <span className="inline-flex items-center gap-1.5 font-semibold text-brand-500">
             Modificar <Icon name="edit" size={14} />

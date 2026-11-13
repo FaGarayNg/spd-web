@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { RoomCard } from "../components/rooms/RoomCard"
 import { Button } from "../components/ui/Button"
 import { useSession } from "../context/SessionContext"
-import { getRooms, getUserRooms } from "../services/rooms"
+import { getRoomMembers, getRooms, getUserRooms } from "../services/rooms"
 import type { Role, Room } from "../types"
 
 const TABS: { role: Role; label: string; empty: string }[] = [
@@ -24,6 +24,7 @@ export default function RoomsPage() {
   const [rooms, setRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [counts, setCounts] = useState<Record<number, number>>({})
 
   useEffect(() => {
     let active = true
@@ -37,6 +38,14 @@ export default function RoomsPage() {
         if (!active) return
         setRooms(result)
         setLoading(false)
+        // El listado no trae los integrantes: se piden por sala (si alguno falla, no se muestra).
+        Promise.all(
+          result.map((room) =>
+            getRoomMembers(room.id).then((list) => [room.id, list.length] as const).catch(() => null),
+          ),
+        ).then((pairs) => {
+          if (active) setCounts(Object.fromEntries(pairs.filter((pair) => pair !== null)))
+        })
       })
       .catch((err: unknown) => {
         if (!active) return
@@ -98,7 +107,7 @@ export default function RoomsPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {rooms.map((room) => (
-            <RoomCard key={room.id} room={room} role={role} />
+            <RoomCard key={room.id} room={room} role={role} members={counts[room.id]} />
           ))}
         </div>
       )}

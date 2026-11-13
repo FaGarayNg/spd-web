@@ -18,12 +18,38 @@ type SessionValue = {
 
 const SessionContext = createContext<SessionValue | null>(null)
 
+const STORAGE_KEY = "spd.session"
+
+function loadSession(): Session | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as Session) : null
+  } catch {
+    return null
+  }
+}
+
+function saveSession(session: Session | null) {
+  try {
+    if (session) localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+    else localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // sin acceso al almacenamiento: la sesión dura hasta recargar
+  }
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null)
+  const [session, setSession] = useState<Session | null>(loadSession)
   const value: SessionValue = {
     session,
-    signIn: (next) => setSession(next),
-    signOut: () => setSession(null),
+    signIn: (next) => {
+      saveSession(next)
+      setSession(next)
+    },
+    signOut: () => {
+      saveSession(null)
+      setSession(null)
+    },
   }
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
 }

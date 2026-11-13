@@ -11,6 +11,7 @@ import { useSession } from "../context/SessionContext"
 import { createGroup, getRoom, getRoomGroups, getRoomMembers, joinGroup, leaveGroup } from "../services/rooms"
 import { ApiError } from "../services/http"
 import type { Group, Member, Role, Room } from "../types"
+import { getRoomKey } from "../utils/accessKey"
 import { initials } from "../utils/initials"
 
 type Format = "group" | "individual"
@@ -33,6 +34,8 @@ export default function RoomPage() {
   const [notice, setNotice] = useState("")
   const [presentationId, setPresentationId] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
+  const [loadError, setLoadError] = useState("")
+  const [attempt, setAttempt] = useState(0)
 
   // La sala existe y sus integrantes son de solo lectura: se cargan al entrar.
   useEffect(() => {
@@ -40,6 +43,7 @@ export default function RoomPage() {
     setRoom(undefined)
     setGroups([])
     setNotice("")
+    setLoadError("")
     getRoom(id)
       .then((result) => {
         if (!active) return
@@ -49,14 +53,27 @@ export default function RoomPage() {
       .then((roomMembers) => {
         if (active && roomMembers) setMembers(roomMembers)
       })
-      .catch(() => {
-        if (active) setRoom(null)
+      .catch((err: unknown) => {
+        if (!active) return
+        // 404: la sala no existe. Cualquier otro error (servidor caído, red) se puede reintentar.
+        if (err instanceof ApiError && err.status === 404) setRoom(null)
+        else setLoadError(err instanceof Error ? err.message : "No se pudo cargar la sala.")
       })
     return () => {
       active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id])
+  }, [id, attempt])
+
+  // El número de integrantes se refresca solo, para ver quién se va sumando.
+  useEffect(() => {
+    if (room == null) return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return
+      getRoomMembers(room.id).then(setMembers).catch(() => undefined)
+    }, 10000)
+    return () => window.clearInterval(timer)
+  }, [room])
 
   // Los invitados (y los anfitriones ya configurados) ven los grupos que haya creados.
   useEffect(() => {
@@ -83,6 +100,14 @@ export default function RoomPage() {
       .catch(() => setNotice("No se pudieron recargar los grupos."))
   }
 
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-start gap-4">
+        <p role="alert" className="rounded-lg bg-brand-50 p-4 text-sm font-medium text-brand-700">{loadError}</p>
+        <Button variant="secondary" onClick={() => setAttempt((n) => n + 1)}>Reintentar</Button>
+      </div>
+    )
+  }
   if (room === undefined) return <p className="text-ink/60">Cargando sala…</p>
   if (room === null) {
     return (
@@ -121,7 +146,7 @@ export default function RoomPage() {
   const toggleGroup = (group: Group) => {
     const userId = session?.userId
     if (userId === undefined || !room) {
-      setNotice("Necesitás una cuenta (Registrate) o entrar como invitado para unirte a un grupo.")
+      setNotice("Para unirte a un grupo registrate o entrá como invitado con la clave de la sala. Iniciar sesión todavía no está disponible en el servidor.")
       return
     }
     setNotice("")
@@ -138,7 +163,7 @@ export default function RoomPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <RoomHeader title={room.name} hasAccessKey={room.hasAccessKey} members={members.length} />
+      <RoomHeader roomId={room.id} title={room.name} hasAccessKey={room.hasAccessKey} accessKey={getRoomKey(room.id)} members={members.length} />
 
       {notice && (
         <p role="alert" className="rounded-lg bg-brand-50 p-4 text-sm font-medium text-brand-700">

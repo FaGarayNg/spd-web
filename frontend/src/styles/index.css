@@ -1,7 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
-/* Paleta 60-30-10: blanco / azul institucional / dorado */
+/* colores */
 @theme {
   --color-surface: #ffffff;
   --color-surface-muted: #f5f7fa;
@@ -16,8 +16,7 @@
   --color-accent: #c9a227;
   --color-accent-strong: #9a7b14;
 
-  /* Cuando la institución tenga licencia de Theinhardt, declarar su
-     @font-face y dejar "Theinhardt" primero en esta lista. */
+
   --font-sans: "Theinhardt", "Inter", system-ui, sans-serif;
 }
 

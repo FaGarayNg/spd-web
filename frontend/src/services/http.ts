@@ -6,6 +6,18 @@
 
 const API_BASE = "/api"
 
+const UNREACHABLE = "No pudimos conectar con el servidor. Probá de nuevo en unos minutos."
+const SERVER_FAILED = "El servidor tuvo un problema. Probá de nuevo en unos minutos."
+
+// Mensaje para el usuario cuando el back no trae uno propio (o es un error del servidor).
+function fallbackMessage(status: number) {
+  if (status === 502 || status === 503 || status === 504) return UNREACHABLE
+  if (status >= 500) return SERVER_FAILED
+  if (status === 404) return "No encontramos lo que buscabas."
+  if (status === 401 || status === 403) return "No tenés permiso para hacer eso."
+  return `No se pudo completar la operación (error ${status}).`
+}
+
 export class ApiError extends Error {
   readonly status: number
 
@@ -36,19 +48,28 @@ type Result<T> = { data: T; status: number };
 async function requestRaw<T>(path: string, options: Options = {}): Promise<Result<T>> {
   const { method = "GET", body, bodyRaw, headers } = options
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: body !== undefined ? { "Content-Type": "application/json", ...headers } : headers,
-    body: body !== undefined ? JSON.stringify(body) : bodyRaw,
-  })
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: body !== undefined ? { "Content-Type": "application/json", ...headers } : headers,
+      body: body !== undefined ? JSON.stringify(body) : bodyRaw,
+    })
+  } catch {
+    // Sin conexión o servidor apagado: el navegador ni llega a recibir respuesta.
+    throw new ApiError(0, UNREACHABLE)
+  }
 
   if (isNotOk(response)) {
-    let message = `Error ${response.status}`
-    try {
-      const parsed: unknown = await response.json()
-      if (isErrorBody(parsed) && parsed.error) message = parsed.error
-    } catch {
-      // Respuesta sin cuerpo JSON: nos quedamos con el mensaje genérico.
+    let message = fallbackMessage(response.status)
+    // Los 5xx nunca se muestran crudos; el resto trae el mensaje del back ({"error": "..."}).
+    if (response.status < 500) {
+      try {
+        const parsed: unknown = await response.json()
+        if (isErrorBody(parsed) && parsed.error) message = parsed.error
+      } catch {
+        // Respuesta sin cuerpo JSON: nos quedamos con el mensaje genérico.
+      }
     }
     throw new ApiError(response.status, message)
   }
