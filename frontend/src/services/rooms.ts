@@ -76,14 +76,9 @@ export async function joinRoom(roomId: number, input: { userId: number; accessKe
 
 // ─── Grupos ─────────────────────────────────────────────────────────────────────────────────
 
-/** Grupos de una sala con sus integrantes (una llamada por grupo más una global con los
- * nombres). GET /api/rooms/:id/groups */
+/** Grupos de una sala con sus integrantes (una llamada por grupo). GET /api/rooms/:id/groups */
 export async function getRoomGroups(roomId: number, sessionUserId: number | null): Promise<Group[]> {
-  // Los integrantes de grupo llegan solo con user_id: los nombres salen de los miembros de la sala.
   const groups = await apiGet<ApiGroup[]>(`/rooms/${roomId}/groups`)
-  if (groups.length === 0) return []
-  const members = await getRoomMembers(roomId)
-  const names = new Map(members.map((m) => [m.id, m.fullName]))
   return Promise.all(
     groups.map(async (group) => {
       const groupMembers = await getGroupMembers(group.id)
@@ -91,10 +86,11 @@ export async function getRoomGroups(roomId: number, sessionUserId: number | null
         id: group.id,
         limit: group.limit,
         priority: group.priority,
+        // El listado de integrantes ya trae nombre: { id, full_name, roles, joined_at }.
         members: groupMembers.map((m) => ({
-          id: m.user_id,
-          fullName: names.get(m.user_id) ?? `Usuario ${m.user_id}`,
-          joined: sessionUserId !== null && m.user_id === sessionUserId,
+          id: m.id,
+          fullName: m.full_name,
+          joined: sessionUserId !== null && m.id === sessionUserId,
         })),
       }
     }),
@@ -111,8 +107,8 @@ export function createGroup(roomId: number, fields: { limit?: number; priority?:
 }
 
 /** Integrantes de un grupo. GET /api/groups/:id/members */
-export function getGroupMembers(groupId: number): Promise<ApiGroupMember[]> {
-  return apiGet<ApiGroupMember[]>(`/groups/${groupId}/members`)
+export function getGroupMembers(groupId: number): Promise<ApiMember[]> {
+  return apiGet<ApiMember[]>(`/groups/${groupId}/members`)
 }
 
 /** Entra a un grupo. Devuelve true si se sumó ahora (201), false si ya estaba (200).

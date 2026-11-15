@@ -60,7 +60,7 @@ export default function GuestJoinPage() {
         })
         user = { name: created.full_name, userId: created.id }
       }
-      await joinRoom(id, { userId: user.userId, accessKey: accessKey || undefined })
+      await joinRoom(id, { userId: user.userId, accessKey })
       if (accessKey) saveRoomKey(id, accessKey)
       signIn(user)
       navigate(`/salas/${id}`, { state: { role: "guest" } })
@@ -70,10 +70,12 @@ export default function GuestJoinPage() {
     }
   }
 
-  const needsKey = room ? room.hasAccessKey : true
-
   return (
-    <SplitCard title="Todo listo para entrar en sala" text="Ingresá tus datos y unite a la presentación en vivo.">
+    <SplitCard
+      title="Todo listo para entrar en sala"
+      text="Ingresá tus datos y unite a la presentación en vivo."
+      back={{ to: "/login", label: "Volver al inicio de sesión" }}
+    >
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold text-brand-700">
           {room ? `Unite a «${room.name}»` : "Unite a la sala"}
@@ -86,10 +88,8 @@ export default function GuestJoinPage() {
           <Field label="Nombre de usuario" placeholder="¿Cómo te llamás?" value={name}
             onChange={(event) => setName(event.target.value)} required />
         )}
-        {needsKey && (
-          <Field label="Clave de la sala" placeholder="Ej. A7K-29P" value={key}
-            onChange={(event) => setKey(event.target.value.toUpperCase())} required />
-        )}
+        <Field label="Clave de la sala" placeholder="Ej. A7K-29P" value={key}
+          onChange={(event) => setKey(event.target.value.toUpperCase())} required />
         {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
         <Button type="submit" disabled={submitting}>{submitting ? "Entrando…" : "Ingresar"}</Button>
       </form>

@@ -36,7 +36,11 @@ export default function RegisterPage() {
   }
 
   return (
-    <SplitCard title="Creá tu cuenta" text="Registrate para crear salas y presentar a tu clase en vivo.">
+    <SplitCard
+      title="Creá tu cuenta"
+      text="Registrate para crear salas y presentar a tu clase en vivo."
+      back={{ to: "/login", label: "Volver al inicio de sesión" }}
+    >
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold text-brand-700">Registrate</h2>
         <Field label="Nombre y apellido" autoComplete="name" value={name}

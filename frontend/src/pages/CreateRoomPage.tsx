@@ -7,14 +7,13 @@ import { useSession } from "../context/SessionContext"
 import { createRoom, joinRoom } from "../services/rooms"
 import { generateAccessKey, saveRoomKey } from "../utils/accessKey"
 
-// POST /api/rooms. Reglas del backend: nombre obligatorio (hasta 200 caracteres), URL opcional
-// http(s), clave de 4+ caracteres (se guarda hasheada; después ya no se puede leer).
+// POST /api/rooms. Reglas del backend: nombre obligatorio (hasta 200 caracteres),
+// clave de 4+ caracteres (se guarda hasheada; después ya no se puede leer).
 // Toda sala se crea con clave: si no se escribe una, se genera.
 export default function CreateRoomPage() {
   const navigate = useNavigate()
   const { session } = useSession()
   const [name, setName] = useState("")
-  const [url, setUrl] = useState("")
   const [accessKey, setAccessKey] = useState("")
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState("")
@@ -25,7 +24,7 @@ export default function CreateRoomPage() {
     setError("")
     const key = accessKey.trim() || generateAccessKey()
     try {
-      const room = await createRoom({ name: name.trim(), url: url.trim() || undefined, accessKey: key })
+      const room = await createRoom({ name: name.trim(), accessKey: key })
       saveRoomKey(room.id, key)
       // Quien crea la sala cuenta como integrante (si tiene usuario real en el back).
       if (session?.userId !== undefined) {
@@ -48,11 +47,6 @@ export default function CreateRoomPage() {
         <h2 className="text-xl font-semibold text-brand-700">Nueva sala</h2>
         <Field label="Nombre de la sala" placeholder="Ej. Desarrollo Web" value={name}
           onChange={(event) => setName(event.target.value)} required maxLength={200} />
-        <Field label="Enlace de la clase virtual (opcional)" type="url" placeholder="https://meet.google.com/…" value={url}
-          onChange={(event) => setUrl(event.target.value)} />
-        <small className="-mt-3 text-ink/60">
-          Es el enlace de Meet, Zoom o Moodle de tu clase. El enlace de esta sala se genera solo al crearla.
-        </small>
         <Field label="Clave de ingreso" placeholder="Si la dejás vacía, generamos una" value={accessKey}
           onChange={(event) => setAccessKey(event.target.value)} minLength={4} maxLength={72} />
         <small className="-mt-3 text-ink/60">

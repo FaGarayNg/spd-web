@@ -11,6 +11,7 @@ export default function AppShell() {
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  // El menú se cierra al tocar afuera o con Escape.
   useEffect(() => {
     if (!open) return
     const close = (event: MouseEvent) => {
@@ -49,9 +50,9 @@ export default function AppShell() {
                 className="flex items-center gap-2.5 rounded-full border border-border py-1 pl-1 pr-4 text-sm font-medium hover:bg-brand-50"
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-700 text-xs font-semibold text-white">
-                  {initials(session.name)}
+                  {initials(session.name || "Invitado")}
                 </span>
-                {session.name}
+                {session.name || "Invitado"}
               </button>
               {open && (
                 <div role="menu" className="absolute right-0 top-full z-10 mt-2 w-48 rounded-lg border border-border bg-surface p-1">

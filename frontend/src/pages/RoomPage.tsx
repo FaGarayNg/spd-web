@@ -75,15 +75,15 @@ export default function RoomPage() {
     return () => window.clearInterval(timer)
   }, [room])
 
-  // Los invitados (y los anfitriones ya configurados) ven los grupos que haya creados.
+  // Se cargan los grupos que ya existan: así, si el anfitrión vuelve a entrar, no se crean de nuevo.
   useEffect(() => {
-    if (room == null || role !== "guest") return
+    if (room == null) return
     let active = true
     getRoomGroups(room.id, session?.userId ?? null)
       .then((result) => {
         if (active) {
           setGroups(result)
-          setConfigured(true) // los grupos ya fueron armados por el anfitrión
+          if (result.length > 0) setConfigured(true) // los grupos ya fueron armados
         }
       })
       .catch(() => setNotice("No se pudieron cargar los grupos de la sala."))
@@ -123,7 +123,9 @@ export default function RoomPage() {
   const showList = !isHost || configured
   const startLive = () =>
     navigate(`/salas/${room.id}/en-vivo`, { state: { role, presentationId } })
-  const inRoom = format === "group" ? groups.reduce((total, g) => total + g.members.length, 0) : members.length
+  // "En sala" son las personas de la sala, no la suma de los grupos (así nadie se cuenta dos veces).
+  const inRoom = members.length
+  const inAnyGroup = groups.some((g) => g.members.some((m) => m.joined))
 
   // El anfitrión arma (n × POST /api/rooms/:id/groups) la grilla real de grupos de la sala.
   const confirmGroups = (count: number, limit: number) => {
@@ -150,9 +152,14 @@ export default function RoomPage() {
       return
     }
     setNotice("")
-    const change = group.members.some((m) => m.joined)
-      ? leaveGroup(group.id, userId)
-      : joinGroup(group.id, userId)
+    const isMember = group.members.some((m) => m.joined)
+    // Una persona solo puede estar en un grupo a la vez.
+    const current = groups.find((g) => g.members.some((m) => m.joined))
+    if (!isMember && current) {
+      setNotice(`Ya estás en el Grupo ${String(current.priority).padStart(2, "0")}. Abandonalo para unirte a otro.`)
+      return
+    }
+    const change = isMember ? leaveGroup(group.id, userId) : joinGroup(group.id, userId)
     change
       .then(reloadGroups)
       .catch((err: unknown) => {
@@ -163,7 +170,7 @@ export default function RoomPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <RoomHeader roomId={room.id} title={room.name} hasAccessKey={room.hasAccessKey} accessKey={getRoomKey(room.id)} members={members.length} />
+      <RoomHeader roomId={room.id} title={room.name} accessKey={getRoomKey(room.id)} members={members.length} />
 
       {notice && (
         <p role="alert" className="rounded-lg bg-brand-50 p-4 text-sm font-medium text-brand-700">
@@ -226,7 +233,7 @@ export default function RoomPage() {
               {format === "group" ? (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   {groups.map((group) => (
-                    <GroupCard key={group.id} group={group} onToggle={() => toggleGroup(group)} />
+                    <GroupCard key={group.id} group={group} blocked={inAnyGroup && !group.members.some((m) => m.joined)} onToggle={() => toggleGroup(group)} />
                   ))}
                 </div>
               ) : (
@@ -243,8 +250,15 @@ export default function RoomPage() {
               {isHost && !preparing && <Button icon="sparkles" className="self-start" onClick={() => setPreparing(true)}>Preparar sala</Button>}
               {isHost && preparing && (
                 <PrepareRoom
-                  items={format === "individual" ? members.map((m) => m.fullName) : groups.map((g) => `Grupo ${g.id}`)}
-                  individual={format === "individual"}
+                  items={
+                    format === "individual"
+                      ? members.map((m) => ({ key: String(m.id), label: m.fullName, badge: initials(m.fullName) }))
+                      : groups.map((g) => ({
+                          key: String(g.id),
+                          label: `Grupo ${String(g.priority).padStart(2, "0")}`,
+                          badge: `G${g.priority}`,
+                        }))
+                  }
                   onStart={startLive}
                 />
               )}

@@ -3,9 +3,9 @@ import type { Group } from "../../types"
 import { initials } from "../../utils/initials"
 import { Button } from "../ui/Button"
 
-type Props = { group: Group; onToggle: () => void }
+type Props = { group: Group; blocked?: boolean; onToggle: () => void }
 
-export function GroupCard({ group, onToggle }: Props) {
+export function GroupCard({ group, blocked = false, onToggle }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [fileName, setFileName] = useState("")
   // Integrante de la sesión: lo marca la carga de datos (user_id de la sesión dentro del grupo).
@@ -34,8 +34,8 @@ export function GroupCard({ group, onToggle }: Props) {
         )}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button variant={joined ? "ghost" : "secondary"} onClick={onToggle} disabled={full}>
-          {joined ? "Abandonar" : full ? "Completo" : "Unirme"}
+        <Button variant={joined ? "ghost" : "secondary"} onClick={onToggle} disabled={full || blocked}>
+          {joined ? "Abandonar" : blocked ? "Ya estás en otro grupo" : full ? "Completo" : "Unirme"}
         </Button>
         {joined && (
           <>
