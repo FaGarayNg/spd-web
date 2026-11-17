@@ -74,6 +74,16 @@ func checkRoles(roles []string) ([]string, error) {
 	return out, nil
 }
 
+// checkFormat valida el modo de presentación de una sala: sin confirmar (""), en grupos o
+// individual.
+func checkFormat(v string) (string, error) {
+	switch v {
+	case "", FormatGroups, FormatIndividual:
+		return v, nil
+	}
+	return "", invalid("format debe ser %q o %q", FormatGroups, FormatIndividual)
+}
+
 // checkURL valida una URL opcional: vacía, o absoluta http(s).
 func checkURL(v string) (string, error) {
 	v = strings.TrimSpace(v)

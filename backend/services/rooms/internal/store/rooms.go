@@ -10,6 +10,9 @@ import (
 
 func (s *Store) CreateRoom(ctx context.Context, r domain.Room) (domain.Room, error) {
 	row := room{Name: r.Name, URL: r.URL, AccessKeyHash: r.AccessKeyHash}
+	if r.OwnerID != 0 {
+		row.OwnerID = &r.OwnerID
+	}
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return domain.Room{}, err
 	}
@@ -39,6 +42,9 @@ func (s *Store) UpdateRoom(ctx context.Context, id uint, ch domain.RoomUpdate) (
 	if ch.AccessKeyHash != nil {
 		changes["access_key_hash"] = *ch.AccessKeyHash
 	}
+	if ch.Format != nil {
+		changes["format"] = *ch.Format
+	}
 	var row room
 	if err := s.update(ctx, &row, id, domain.ErrRoomNotFound, changes); err != nil {
 		return domain.Room{}, err
@@ -62,6 +68,10 @@ func (s *Store) DeleteRoom(ctx context.Context, id uint) error {
 			return err
 		}
 		if err := tx.Where("group_id IN (?)", groups).Delete(&groupMember{}).Error; err != nil {
+			return err
+		}
+		// live_sessions no tiene borrado lógico: su fila se borra de verdad con la sala.
+		if err := tx.Where("room_id = ?", id).Delete(&liveSession{}).Error; err != nil {
 			return err
 		}
 		return tx.Where("room_id = ?", id).Delete(&roomMember{}).Error

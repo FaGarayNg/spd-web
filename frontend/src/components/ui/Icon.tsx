@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 export type IconName =
   | "arrowLeft" | "arrowRight" | "brush" | "check" | "copy" | "dice" | "edit"
   | "eraser" | "expand" | "eye" | "file" | "link" | "list" | "lock" | "logout" | "people"
-  | "play" | "reset" | "sparkles" | "upload"
+  | "play" | "reset" | "sparkles" | "trash" | "upload"
 
 const paths: Record<IconName, ReactNode> = {
   arrowLeft: <path d="m15 18-6-6 6-6" />,
@@ -62,6 +62,12 @@ const paths: Record<IconName, ReactNode> = {
   reset: <path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5" />,
   sparkles: <path d="m12 3-1.2 3.8L7 8l3.8 1.2L12 13l1.2-3.8L17 8l-3.8-1.2L12 3ZM5 14l-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8L5 14ZM19 14l-.7 1.8-1.8.7 1.8.7L19 19l.7-1.8 1.8-.7-1.8-.7L19 14Z" />,
   upload: <path d="M12 16V4m0 0L7 9m5-5 5 5M5 20h14" />,
+  trash: (
+    <>
+      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
+    </>
+  ),
 }
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {

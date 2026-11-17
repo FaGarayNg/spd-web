@@ -4,18 +4,31 @@ import { SplitCard } from "../components/layout/SplitCard"
 import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
+import { login } from "../services/rooms"
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const { signIn } = useSession()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
+  const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    // TODO: autenticar contra el back cuando exista el endpoint de login.
-    signIn({ name: email.split("@")[0] })
-    navigate("/salas")
+    setSubmitting(true)
+    setError("")
+    // POST /api/auth/login: el back verifica contra el hash bcrypt y devuelve el JWT. El token
+    // va dentro de la sesión y http.ts lo manda en cada petición (ver SessionContext).
+    login(email, password)
+      .then((result) => {
+        signIn({ name: result.user.full_name, userId: result.user.id, token: result.token })
+        navigate("/salas")
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.")
+        setSubmitting(false)
+      })
   }
 
   return (
@@ -31,12 +44,11 @@ export default function LoginPage() {
         <Field label="Contraseña" type="password" autoComplete="current-password"
           placeholder="Ingresá tu contraseña" value={password}
           onChange={(event) => setPassword(event.target.value)} required />
-        <Button type="submit">Iniciar sesión</Button>
+        {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
+        <Button type="submit" disabled={submitting}>{submitting ? "Ingresando…" : "Iniciar sesión"}</Button>
         <p className="text-sm text-ink/70">
           ¿No tenés cuenta?{" "}
           <Link to="/registro" className="font-semibold text-brand-500 hover:underline">Registrate</Link>
-          {" · "}
-          <Link to="/unirse" className="font-semibold text-brand-500 hover:underline">Entrar como invitado</Link>
         </p>
       </form>
     </SplitCard>

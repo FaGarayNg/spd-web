@@ -34,8 +34,15 @@ type PresentationChanges struct {
 	Slides *[]int32 `json:"slides"`
 }
 
-// CreateGroup crea un grupo en una sala.
-func (s *Service) CreateGroup(ctx context.Context, roomID uint, in GroupFields) (Group, error) {
+// CreateGroup crea un grupo en una sala. Solo el anfitrión puede armar la grilla de grupos.
+func (s *Service) CreateGroup(ctx context.Context, callerID, roomID uint, in GroupFields) (Group, error) {
+	r, err := s.store.GetRoom(ctx, roomID)
+	if err != nil {
+		return Group{}, err
+	}
+	if err := checkOwner(r, callerID); err != nil {
+		return Group{}, err
+	}
 	switch {
 	case in.Limit == nil:
 		return Group{}, invalid("limit es obligatorio")
@@ -59,17 +66,56 @@ func (s *Service) GetGroup(ctx context.Context, id uint) (Group, error) {
 }
 
 // UpdateGroup modifica los campos indicados de un grupo. El cupo no puede quedar por debajo de
-// los integrantes actuales (ErrLimitBelowMembers).
-func (s *Service) UpdateGroup(ctx context.Context, id uint, in GroupFields) (Group, error) {
+// los integrantes actuales (ErrLimitBelowMembers). Solo el anfitrión puede.
+func (s *Service) UpdateGroup(ctx context.Context, callerID, id uint, in GroupFields) (Group, error) {
+	if err := s.checkOwnerOfGroup(ctx, callerID, id); err != nil {
+		return Group{}, err
+	}
 	if err := checkGroup(in); err != nil {
 		return Group{}, err
 	}
 	return s.store.UpdateGroup(ctx, id, in)
 }
 
-// DeleteGroup borra (lógicamente) un grupo, sus presentaciones y sus integrantes.
-func (s *Service) DeleteGroup(ctx context.Context, id uint) error {
+// DeleteGroup borra (lógicamente) un grupo, sus presentaciones y sus integrantes. Solo el
+// anfitrión puede.
+func (s *Service) DeleteGroup(ctx context.Context, callerID, id uint) error {
+	if err := s.checkOwnerOfGroup(ctx, callerID, id); err != nil {
+		return err
+	}
 	return s.store.DeleteGroup(ctx, id)
+}
+
+// checkOwnerOfGroup comprueba que caller sea el dueño de la sala a la que pertenece el grupo.
+// Devuelve el error correspondiente (404 grupo inexistente, 401 sin sesión, 403 sin permiso).
+func (s *Service) checkOwnerOfGroup(ctx context.Context, callerID, groupID uint) error {
+	g, err := s.store.GetGroup(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	r, err := s.store.GetRoom(ctx, g.RoomID)
+	if err != nil {
+		return err
+	}
+	return checkOwner(r, callerID)
+}
+
+// checkMemberOfGroup comprueba que caller sea dueño o miembro de la sala del grupo (para
+// asignar o cambiar la presentación del propio grupo).
+func (s *Service) checkMemberOfGroup(ctx context.Context, callerID, groupID uint) error {
+	g, err := s.store.GetGroup(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	r, err := s.store.GetRoom(ctx, g.RoomID)
+	if err != nil {
+		return err
+	}
+	member, err := s.store.IsRoomMember(ctx, g.RoomID, callerID)
+	if err != nil {
+		return err
+	}
+	return checkMember(r, callerID, member)
 }
 
 // JoinGroup une a un usuario a un grupo (DetalleGrupo). Tiene que ser miembro de la sala del
@@ -94,14 +140,15 @@ func (s *Service) LeaveGroup(ctx context.Context, groupID, userID uint) error {
 
 // AddPresentation asigna una presentación a un grupo. Cada presentación pertenece a un único
 // grupo: si ya está asignada, devuelve ErrPresentationAssigned. Una que se quitó antes se
-// reactiva con los datos nuevos.
-func (s *Service) AddPresentation(ctx context.Context, groupID uint, in NewPresentation) (Presentation, error) {
+// reactiva con los datos nuevos. Solo el anfitrión o un miembro de la sala pueden.
+func (s *Service) AddPresentation(ctx context.Context, callerID, groupID uint, in NewPresentation) (Presentation, error) {
 	id, ok := platform.CanonicalUUID(in.PresentationID)
 	if !ok {
 		return Presentation{}, invalid("presentation_id debe ser un UUID")
 	}
-	// Antes de consultar al servicio presentations: un grupo inexistente es un 404, no un 422.
-	if _, err := s.store.GetGroup(ctx, groupID); err != nil {
+	// Antes de consultar al servicio presentations: un grupo inexistente es un 404, no un 422,
+	// y sin permiso tampoco se consulta.
+	if err := s.checkMemberOfGroup(ctx, callerID, groupID); err != nil {
 		return Presentation{}, err
 	}
 	slides, err := s.checkSlides(ctx, id, in.Slides)
@@ -125,8 +172,12 @@ func (s *Service) GetPresentation(ctx context.Context, groupID uint, presentatio
 	return s.store.GetPresentation(ctx, groupID, id)
 }
 
-// UpdatePresentation cambia las diapositivas de una presentación de un grupo.
-func (s *Service) UpdatePresentation(ctx context.Context, groupID uint, presentationID string, in PresentationChanges) (Presentation, error) {
+// UpdatePresentation cambia las diapositivas de una presentación de un grupo. Solo el anfitrión
+// o un miembro de la sala pueden.
+func (s *Service) UpdatePresentation(ctx context.Context, callerID, groupID uint, presentationID string, in PresentationChanges) (Presentation, error) {
+	if err := s.checkMemberOfGroup(ctx, callerID, groupID); err != nil {
+		return Presentation{}, err
+	}
 	p, err := s.GetPresentation(ctx, groupID, presentationID)
 	if err != nil || in.Slides == nil {
 		return p, err
@@ -138,11 +189,15 @@ func (s *Service) UpdatePresentation(ctx context.Context, groupID uint, presenta
 	return s.store.SetSlides(ctx, groupID, p.ID, slides)
 }
 
-// RemovePresentation quita (borrado lógico) una presentación de un grupo.
-func (s *Service) RemovePresentation(ctx context.Context, groupID uint, presentationID string) error {
+// RemovePresentation quita (borrado lógico) una presentación de un grupo. Solo el anfitrión
+// puede: es una decisión sobre cómo va a presentar la clase.
+func (s *Service) RemovePresentation(ctx context.Context, callerID, groupID uint, presentationID string) error {
 	id, ok := platform.CanonicalUUID(presentationID)
 	if !ok {
 		return ErrPresentationNotFound
+	}
+	if err := s.checkOwnerOfGroup(ctx, callerID, groupID); err != nil {
+		return err
 	}
 	return s.store.RemovePresentation(ctx, groupID, id)
 }

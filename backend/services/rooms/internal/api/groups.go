@@ -19,7 +19,7 @@ func (h *Handler) getGroup(c *gin.Context) {
 	h.reply(c, http.StatusOK, g, err)
 }
 
-// updateGroup atiende PATCH /api/groups/:id.
+// updateGroup atiende PATCH /api/groups/:id. Solo el anfitrión de la sala del grupo.
 func (h *Handler) updateGroup(c *gin.Context) {
 	id, ok := idParam(c, "id")
 	if !ok {
@@ -29,17 +29,25 @@ func (h *Handler) updateGroup(c *gin.Context) {
 	if !bind(c, &in) {
 		return
 	}
-	g, err := h.svc.UpdateGroup(c.Request.Context(), id, in)
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	g, err := h.svc.UpdateGroup(c.Request.Context(), caller, id, in)
 	h.reply(c, http.StatusOK, g, err)
 }
 
-// deleteGroup atiende DELETE /api/groups/:id.
+// deleteGroup atiende DELETE /api/groups/:id. Solo el anfitrión de la sala del grupo.
 func (h *Handler) deleteGroup(c *gin.Context) {
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
 	id, ok := idParam(c, "id")
 	if !ok {
 		return
 	}
-	h.noContent(c, h.svc.DeleteGroup(c.Request.Context(), id))
+	h.noContent(c, h.svc.DeleteGroup(c.Request.Context(), caller, id))
 }
 
 // groupMembers atiende GET /api/groups/:id/members.
@@ -94,7 +102,8 @@ func (h *Handler) groupPresentations(c *gin.Context) {
 	h.reply(c, http.StatusOK, presentations, err)
 }
 
-// addPresentation atiende POST /api/groups/:id/presentations.
+// addPresentation atiende POST /api/groups/:id/presentations. Solo el anfitrión o un miembro
+// de la sala.
 func (h *Handler) addPresentation(c *gin.Context) {
 	id, ok := idParam(c, "id")
 	if !ok {
@@ -104,7 +113,11 @@ func (h *Handler) addPresentation(c *gin.Context) {
 	if !bind(c, &in) {
 		return
 	}
-	p, err := h.svc.AddPresentation(c.Request.Context(), id, in)
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	p, err := h.svc.AddPresentation(c.Request.Context(), caller, id, in)
 	if err == nil {
 		c.Header("Location", fmt.Sprintf("/api/groups/%d/presentations/%s", id, p.ID))
 	}
@@ -125,7 +138,8 @@ func (h *Handler) getPresentation(c *gin.Context) {
 	h.reply(c, http.StatusOK, p, err)
 }
 
-// updatePresentation atiende PATCH /api/groups/:id/presentations/:presentation_id.
+// updatePresentation atiende PATCH /api/groups/:id/presentations/:presentation_id. Solo el
+// anfitrión o un miembro de la sala.
 func (h *Handler) updatePresentation(c *gin.Context) {
 	id, ok := idParam(c, "id")
 	if !ok {
@@ -139,12 +153,21 @@ func (h *Handler) updatePresentation(c *gin.Context) {
 	if !bind(c, &in) {
 		return
 	}
-	p, err := h.svc.UpdatePresentation(c.Request.Context(), id, pid, in)
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	p, err := h.svc.UpdatePresentation(c.Request.Context(), caller, id, pid, in)
 	h.reply(c, http.StatusOK, p, err)
 }
 
-// removePresentation atiende DELETE /api/groups/:id/presentations/:presentation_id.
+// removePresentation atiende DELETE /api/groups/:id/presentations/:presentation_id. Solo el
+// anfitrión de la sala del grupo.
 func (h *Handler) removePresentation(c *gin.Context) {
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
 	id, ok := idParam(c, "id")
 	if !ok {
 		return
@@ -153,5 +176,5 @@ func (h *Handler) removePresentation(c *gin.Context) {
 	if !ok {
 		return
 	}
-	h.noContent(c, h.svc.RemovePresentation(c.Request.Context(), id, pid))
+	h.noContent(c, h.svc.RemovePresentation(c.Request.Context(), caller, id, pid))
 }

@@ -28,6 +28,8 @@ export class ApiError extends Error {
   }
 }
 
+import { getToken } from "../utils/token"
+
 type Options = {
   /** Método HTTP. Por defecto GET. */
   method?: string
@@ -48,11 +50,16 @@ type Result<T> = { data: T; status: number };
 async function requestRaw<T>(path: string, options: Options = {}): Promise<Result<T>> {
   const { method = "GET", body, bodyRaw, headers } = options
 
+  // Si hay sesión iniciada, el token viaja en cada petición: es lo único que el backend mira
+  // para saber quién pide (los invitados sin cuenta siguen anónimos).
+  const token = getToken()
+  const withAuth = token !== null ? { Authorization: `Bearer ${token}`, ...headers } : headers
+
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json", ...headers } : headers,
+      headers: body !== undefined ? { "Content-Type": "application/json", ...withAuth } : withAuth,
       body: body !== undefined ? JSON.stringify(body) : bodyRaw,
     })
   } catch {
@@ -92,13 +99,13 @@ export function apiGet<T>(path: string): Promise<T> {
   return request<T>(path)
 }
 
-export function apiSend<T>(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<T> {
+export function apiSend<T>(path: string, method: "POST" | "PUT" | "PATCH" | "DELETE", body?: unknown): Promise<T> {
   return request<T>(path, { method, body })
 }
 
 /** Como apiSend, pero además del cuerpo devuelve el código HTTP: los endpoints que crean (o
  * re-usan) pertenencias como POST /api/rooms/:id/members distinguen el 201 del 200. */
-export function apiSendWithStatus<T>(path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown): Promise<Result<T>> {
+export function apiSendWithStatus<T>(path: string, method: "POST" | "PUT" | "PATCH" | "DELETE", body?: unknown): Promise<Result<T>> {
   return requestRaw<T>(path, { method, body })
 }
 

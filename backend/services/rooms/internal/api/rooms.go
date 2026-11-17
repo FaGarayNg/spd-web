@@ -9,13 +9,18 @@ import (
 	"spd.web/services/rooms/internal/domain"
 )
 
-// createRoom atiende POST /api/rooms.
+// createRoom atiende POST /api/rooms. Con sesión: el usuario queda como dueño de la sala;
+// sin sesión es 401. Primero el cuerpo (400 de forma antes que 401 de sesión).
 func (h *Handler) createRoom(c *gin.Context) {
 	var in domain.NewRoom
 	if !bind(c, &in) {
 		return
 	}
-	r, err := h.svc.CreateRoom(c.Request.Context(), in)
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	r, err := h.svc.CreateRoom(c.Request.Context(), caller, in)
 	if err == nil {
 		c.Header("Location", fmt.Sprintf("/api/rooms/%d", r.ID))
 	}
@@ -38,7 +43,7 @@ func (h *Handler) getRoom(c *gin.Context) {
 	h.reply(c, http.StatusOK, r, err)
 }
 
-// updateRoom atiende PATCH /api/rooms/:id.
+// updateRoom atiende PATCH /api/rooms/:id. Solo el anfitrión.
 func (h *Handler) updateRoom(c *gin.Context) {
 	id, ok := idParam(c, "id")
 	if !ok {
@@ -48,17 +53,25 @@ func (h *Handler) updateRoom(c *gin.Context) {
 	if !bind(c, &in) {
 		return
 	}
-	r, err := h.svc.UpdateRoom(c.Request.Context(), id, in)
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	r, err := h.svc.UpdateRoom(c.Request.Context(), caller, id, in)
 	h.reply(c, http.StatusOK, r, err)
 }
 
-// deleteRoom atiende DELETE /api/rooms/:id.
+// deleteRoom atiende DELETE /api/rooms/:id. Solo el anfitrión.
 func (h *Handler) deleteRoom(c *gin.Context) {
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
 	id, ok := idParam(c, "id")
 	if !ok {
 		return
 	}
-	h.noContent(c, h.svc.DeleteRoom(c.Request.Context(), id))
+	h.noContent(c, h.svc.DeleteRoom(c.Request.Context(), caller, id))
 }
 
 // roomMembers atiende GET /api/rooms/:id/members.
@@ -113,7 +126,7 @@ func (h *Handler) roomGroups(c *gin.Context) {
 	h.reply(c, http.StatusOK, groups, err)
 }
 
-// createGroup atiende POST /api/rooms/:id/groups.
+// createGroup atiende POST /api/rooms/:id/groups. Solo el anfitrión.
 func (h *Handler) createGroup(c *gin.Context) {
 	id, ok := idParam(c, "id")
 	if !ok {
@@ -123,7 +136,11 @@ func (h *Handler) createGroup(c *gin.Context) {
 	if !bind(c, &in) {
 		return
 	}
-	g, err := h.svc.CreateGroup(c.Request.Context(), id, in)
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	g, err := h.svc.CreateGroup(c.Request.Context(), caller, id, in)
 	if err == nil {
 		c.Header("Location", fmt.Sprintf("/api/groups/%d", g.ID))
 	}

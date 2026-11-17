@@ -4,6 +4,8 @@ import { SlideStage } from "../components/live/SlideStage"
 import { Button } from "../components/ui/Button"
 import { Icon } from "../components/ui/Icon"
 import { controlPresentation, connectPresentationSocket, type ControlCommand } from "../services/live"
+import { clearLiveSession, getLiveSession, getRoom } from "../services/rooms"
+import { useSession } from "../context/SessionContext"
 import type { ApiError } from "../services/http"
 import type { ApiSlideState, Role } from "../types"
 
@@ -12,14 +14,55 @@ type LocationState = { role?: Role; presentationId?: string }
 export default function LivePage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
+  const { session } = useSession()
   const state = (useLocation().state as LocationState | null) ?? {}
-  const isHost = (state.role ?? "guest") === "host"
-  const presentationId = state.presentationId ?? null
+
+  // El anfitrión es el dueño de la sala (owner_id en el back); el rol de la navegación solo
+  // vale mientras llega la respuesta de la sala.
+  const [isHost, setIsHost] = useState((state.role ?? "guest") === "host")
+  useEffect(() => {
+    let active = true
+    getRoom(id)
+      .then((room) => {
+        if (active) setIsHost(session?.userId !== undefined && room.ownerId === session.userId)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [id, session?.userId])
+
+  // La presentación que se proyecta es estado: el espectador la sigue consultando la sesión
+  // publicada de la sala (si el anfitrión pasa al grupo siguiente, cambia sola).
+  const [presentationId, setPresentationId] = useState<string | null>(state.presentationId ?? null)
+  const [watching, setWatching] = useState(false) // alguna vez hubo imagen en pantalla
 
   const [sessionState, setSessionState] = useState<ApiSlideState | null>(null)
   const [connection, setConnection] = useState<"connecting" | "live" | "ended" | "error">("connecting")
   const [error, setError] = useState("")
   const stageRef = useRef<HTMLDivElement>(null)
+
+  // El espectador consulta la sesión en vivo de la sala: cambia de presentación cuando el
+  // anfitrión lanza otra (siguiente grupo) y se entera cuando la finaliza.
+  useEffect(() => {
+    if (isHost) return
+    let active = true
+    const check = () => {
+      getLiveSession(id)
+        .then((session) => {
+          if (active) setPresentationId(session?.presentationId ?? null)
+        })
+        .catch(() => undefined) // un fallo puntual se corrige con el siguiente intento
+    }
+    check()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") check()
+    }, 5000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [id, isHost])
 
   // La sesión en vivo es un WebSocket: el servidor manda el estado vigente apenas entra un
   // visor y re-manda en cada cambio del presentador.
@@ -38,6 +81,7 @@ export default function LivePage() {
     function handleState(state: ApiSlideState) {
       if (state.type !== "slide") return
       setSessionState(state)
+      setWatching(true)
       setConnection("live")
     }
     function handleError(event: Event | CloseEvent) {
@@ -84,6 +128,13 @@ export default function LivePage() {
 
   const leave = () => navigate(`/salas/${id}`, { state: { role: isHost ? "host" : "guest" } })
 
+  // Finalizar: el anfitrión quita la sesión publicada de la sala (los espectadores se enteran en
+  // su próxima consulta) y vuelve a la sala. Idempotente: finalizar dos veces no es un error.
+  const finish = () => {
+    if (isHost) clearLiveSession(id).catch(() => undefined)
+    leave()
+  }
+
   if (sessionState === null) {
     return (
       <div className="flex flex-col gap-5">
@@ -94,9 +145,13 @@ export default function LivePage() {
           <p role="alert" className="text-sm font-medium text-red-700">{error}</p>
         )}
         {connection === "ended" ? (
-          <p className="text-ink/70">
-            Cuando el presentador suba su archivo e inicie la presentación, acá se ve en tiempo real.
-          </p>
+          watching ? (
+            <p className="text-ink/70">El presentador finalizó la sesión.</p>
+          ) : (
+            <p className="text-ink/70">
+              Cuando el presentador inicie la presentación, acá se ve en tiempo real.
+            </p>
+          )
         ) : (
           <p className="text-ink/60">Sincronizando el estado de la presentación…</p>
         )}
@@ -148,9 +203,9 @@ export default function LivePage() {
       <div className="flex flex-wrap gap-3">
         <Button variant="secondary" icon="expand" onClick={() => stageRef.current?.requestFullscreen?.()}>Pantalla completa</Button>
         <Button variant="secondary" icon="logout" onClick={leave}>Abandonar</Button>
-        {/* TODO: el back no tiene orden de "terminar sesión"; el Hub expira la sesión por
-            inactividad (ver TTL del servicio realtime). */}
-        <Button icon="check" onClick={leave}>Finalizar presentación</Button>
+        {isHost && (
+          <Button icon="check" onClick={finish}>Finalizar presentación</Button>
+        )}
       </div>
     </div>
   )

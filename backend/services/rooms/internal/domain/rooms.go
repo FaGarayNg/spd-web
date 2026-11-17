@@ -14,11 +14,13 @@ type NewRoom struct {
 }
 
 // RoomChanges son los campos modificables de una sala; los que llegan nil no cambian. Una
-// AccessKey vacía quita la clave.
+// AccessKey vacía quita la clave. Format confirma el modo de presentación (domain.FormatGroups
+// o domain.FormatIndividual).
 type RoomChanges struct {
 	Name      *string `json:"name"`
 	URL       *string `json:"url"`
 	AccessKey *string `json:"access_key"`
+	Format    *string `json:"format"`
 }
 
 // Join son los datos para unirse a una sala.
@@ -27,8 +29,12 @@ type Join struct {
 	AccessKey string `json:"access_key"`
 }
 
-// CreateRoom da de alta una sala. La clave de ingreso se guarda como hash bcrypt.
-func (s *Service) CreateRoom(ctx context.Context, in NewRoom) (Room, error) {
+// CreateRoom da de alta una sala. La clave de ingreso se guarda como hash bcrypt. Solo con
+// sesión: el creador queda como dueño y hace de anfitrión.
+func (s *Service) CreateRoom(ctx context.Context, ownerID uint, in NewRoom) (Room, error) {
+	if ownerID == 0 {
+		return Room{}, ErrUnauthenticated
+	}
 	var r Room
 	var err error
 	if r.Name, err = checkName("name", in.Name); err != nil {
@@ -40,6 +46,7 @@ func (s *Service) CreateRoom(ctx context.Context, in NewRoom) (Room, error) {
 	if r.AccessKeyHash, err = accessKeyHash(in.AccessKey); err != nil {
 		return Room{}, err
 	}
+	r.OwnerID = ownerID
 	return s.store.CreateRoom(ctx, r)
 }
 
@@ -53,8 +60,15 @@ func (s *Service) GetRoom(ctx context.Context, id uint) (Room, error) {
 	return s.store.GetRoom(ctx, id)
 }
 
-// UpdateRoom modifica los campos indicados de una sala.
-func (s *Service) UpdateRoom(ctx context.Context, id uint, in RoomChanges) (Room, error) {
+// UpdateRoom modifica los campos indicados de una sala. Solo el anfitrión (dueño) puede.
+func (s *Service) UpdateRoom(ctx context.Context, callerID, id uint, in RoomChanges) (Room, error) {
+	r, err := s.store.GetRoom(ctx, id)
+	if err != nil {
+		return Room{}, err
+	}
+	if err := checkOwner(r, callerID); err != nil {
+		return Room{}, err
+	}
 	var ch RoomUpdate
 	if in.Name != nil {
 		v, err := checkName("name", *in.Name)
@@ -77,12 +91,26 @@ func (s *Service) UpdateRoom(ctx context.Context, id uint, in RoomChanges) (Room
 		}
 		ch.AccessKeyHash = &v
 	}
+	if in.Format != nil {
+		v, err := checkFormat(*in.Format)
+		if err != nil {
+			return Room{}, err
+		}
+		ch.Format = &v
+	}
 	return s.store.UpdateRoom(ctx, id, ch)
 }
 
 // DeleteRoom borra (lógicamente) una sala con sus grupos, las presentaciones de esos grupos y
-// sus miembros.
-func (s *Service) DeleteRoom(ctx context.Context, id uint) error {
+// sus miembros. Solo el anfitrión (dueño) puede.
+func (s *Service) DeleteRoom(ctx context.Context, callerID, id uint) error {
+	r, err := s.store.GetRoom(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := checkOwner(r, callerID); err != nil {
+		return err
+	}
 	return s.store.DeleteRoom(ctx, id)
 }
 

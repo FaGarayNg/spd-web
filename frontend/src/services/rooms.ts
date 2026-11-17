@@ -2,6 +2,8 @@ import type {
   ApiGroup,
   ApiGroupFields,
   ApiGroupMember,
+  ApiLiveSession,
+  ApiLoginResponse,
   ApiMember,
   ApiNewRoom,
   ApiRoom,
@@ -10,10 +12,11 @@ import type {
   ApiPresentation,
   ApiUser,
   Group,
+  LiveSession,
   Member,
   Room,
 } from "../types"
-import { apiGet, apiSend, apiSendWithStatus } from "./http"
+import { apiGet, apiSend, apiSendWithStatus, ApiError } from "./http"
 
 // Dominio "salas" del gateway: usuarios, salas y sus miembros, grupos y sus integrantes, y las
 // presentaciones asignadas a cada grupo. Los errores llegan como ApiError (ver http.ts), con el
@@ -26,6 +29,8 @@ const toRoom = (api: ApiRoom): Room => ({
   id: api.id,
   name: api.name,
   url: api.url,
+  ownerId: api.owner_id,
+  format: api.format,
   hasAccessKey: api.has_access_key,
   createdAt: api.created_at,
   updatedAt: api.updated_at,
@@ -48,6 +53,20 @@ export async function getUserRooms(userId: number): Promise<Room[]> {
 /** Una sala. GET /api/rooms/:id. Rechaza con ApiError si no existe. */
 export function getRoom(id: number | string): Promise<Room> {
   return apiGet<ApiRoom>(`/rooms/${id}`).then(toRoom)
+}
+
+/** Modifica los campos indicados de una sala (los ausentes no cambian). PATCH /api/rooms/:id.
+ * Owner-only en el back: 401 sin sesión, 403 si no sos el anfitrión. */
+export function updateRoom(
+  roomId: number,
+  changes: { name?: string; url?: string; accessKey?: string; format?: string },
+): Promise<Room> {
+  const body: Record<string, unknown> = {}
+  if (changes.name !== undefined) body.name = changes.name
+  if (changes.url !== undefined) body.url = changes.url
+  if (changes.accessKey !== undefined) body.access_key = changes.accessKey
+  if (changes.format !== undefined) body.format = changes.format
+  return apiSend<ApiRoom>(`/rooms/${roomId}`, "PATCH", body).then(toRoom)
 }
 
 /** Crea una sala: sin clave de ingreso si accessKey queda vacía. POST /api/rooms */
@@ -128,7 +147,59 @@ export function getGroupPresentations(groupId: number): Promise<ApiPresentation[
   return apiGet<ApiPresentation[]>(`/groups/${groupId}/presentations`)
 }
 
+/** Asigna una presentación (subida a /api/presentations/upload) al grupo: la ve entera.
+ * POST /api/groups/:id/presentations. 409 si ya está asignada a otro grupo, 422 si el back
+ * no conoce ese id, 503 si no puede verificarlo con el servicio presentations. */
+export function assignGroupPresentation(groupId: number, presentationId: string): Promise<ApiPresentation> {
+  return apiSend<ApiPresentation>(`/groups/${groupId}/presentations`, "POST", {
+    presentation_id: presentationId,
+  })
+}
+
+/** Quita una presentación asignada. DELETE /api/groups/:id/presentations/:presentation_id */
+export function unassignGroupPresentation(groupId: number, presentationId: string): Promise<void> {
+  return apiSend<void>(`/groups/${groupId}/presentations/${presentationId}`, "DELETE")
+}
+
+// ─── Sesión en vivo ──────────────────────────────────────────────────────────────────────────
+
+// La sesión en vivo es el puntero que publica el anfitrión: qué presentación se proyecta ahora.
+// El backend solo guarda hashes de la clave, así que estos endpoints no exigen rol: el rol lo
+// maneja la interfaz (igual que en el resto de la sala).
+
+/** La sesión en vivo de la sala, o null si no hay ninguna (404 del back).
+ * GET /api/rooms/:id/live-session */
+export async function getLiveSession(roomId: number | string): Promise<LiveSession | null> {
+  try {
+    const api = await apiGet<ApiLiveSession>(`/rooms/${roomId}/live-session`)
+    return { presentationId: api.presentation_id, startedAt: api.started_at }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+/** Lanza (o reemplaza) la sesión en vivo con una presentación: se proyecta desde ahora.
+ * PUT /api/rooms/:id/live-session. Rechaza con ApiError: 404 sala inexistente, 422 presentación
+ * desconocida, 503 servicio presentations caído. */
+export function setLiveSession(roomId: number | string, presentationId: string): Promise<LiveSession> {
+  return apiSend<ApiLiveSession>(`/rooms/${roomId}/live-session`, "PUT", { presentation_id: presentationId })
+    .then((api) => ({ presentationId: api.presentation_id, startedAt: api.started_at }))
+}
+
+/** Da por terminada la sesión en vivo (idempotente: sin sesión también es éxito).
+ * DELETE /api/rooms/:id/live-session */
+export function clearLiveSession(roomId: number | string): Promise<void> {
+  return apiSend<void>(`/rooms/${roomId}/live-session`, "DELETE")
+}
+
 // ─── Usuarios ───────────────────────────────────────────────────────────────────────────────
+
+/** Inicia sesión: POST /api/auth/login. Devuelve el token de la sesión y el usuario; rechaza
+ * con el mensaje del back (el mismo 401 para correo inexistente y contraseña incorrecta). */
+export function login(email: string, password: string): Promise<ApiLoginResponse> {
+  return apiSend<ApiLoginResponse>("/auth/login", "POST", { email, password })
+}
 
 /** Crea un usuario. POST /api/users. 409 si el email ya está registrado. */
 export function createUser(input: {
@@ -143,6 +214,23 @@ export function createUser(input: {
     password: input.password,
     ...(input.roles ? { roles: input.roles } : {}),
   })
+}
+
+/** Crea una cuenta real para un invitado: el backend no tiene login ni "invitados", así que la
+ * identidad es un usuario común con email y contraseña autogenerados (nunca salen del
+ * navegador). Devuelve el usuario para obtener su id y unirse a la sala/grupo. */
+export function createGuestUser(fullName: string): Promise<ApiUser> {
+  // UUID: sin colisiones ni datos personales en el email. Dominio reservado, no existe.
+  const email = `guest-${crypto.randomUUID()}@invitados.spd.local`
+  const password = randomSecret()
+  return createUser({ fullName, email, password })
+}
+
+// Secreto de 16+ caracteres: suficiente para la validación del back (mínimo 8) y desechable.
+function randomSecret(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return btoa(String.fromCharCode(...bytes)) // base64: ~22 chars imprimibles
 }
 
 /** Un usuario. GET /api/users/:id */

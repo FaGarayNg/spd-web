@@ -43,7 +43,7 @@ func Open(dsn string, maxConns int, log *slog.Logger) (*gorm.DB, error) {
 // Migrate crea o actualiza las tablas, los índices y las claves foráneas (AutoMigrate de GORM).
 // Solo añade: nunca borra ni renombra columnas.
 func Migrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(&user{}, &room{}, &roomMember{}, &group{}, &groupMember{}, &presentation{}); err != nil {
+	if err := db.AutoMigrate(&user{}, &room{}, &roomMember{}, &group{}, &groupMember{}, &presentation{}, &liveSession{}); err != nil {
 		return fmt.Errorf("migrar la base de datos: %w", err)
 	}
 	return nil

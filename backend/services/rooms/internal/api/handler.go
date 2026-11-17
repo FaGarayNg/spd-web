@@ -1,5 +1,5 @@
 // Package api expone el dominio "salas" por HTTP: usuarios, salas y sus miembros, grupos y sus
-// integrantes, y las presentaciones asignadas a cada grupo.
+// integrantes, las presentaciones asignadas a cada grupo y la sesión en vivo de la sala.
 package api
 
 import (
@@ -22,15 +22,20 @@ const maxBodyBytes = 1 << 20
 type Handler struct {
 	svc *domain.Service
 	log *slog.Logger
+	// tokenSecret verifica los JWT de la cabecera Authorization (el mismo con el que los
+	// firma el login; ver main.go, JWT_SECRET).
+	tokenSecret string
 }
 
 // New crea el Handler.
-func New(svc *domain.Service, log *slog.Logger) *Handler {
-	return &Handler{svc: svc, log: log}
+func New(svc *domain.Service, log *slog.Logger, tokenSecret string) *Handler {
+	return &Handler{svc: svc, log: log, tokenSecret: tokenSecret}
 }
 
 // Register registra las rutas del servicio.
 func (h *Handler) Register(r gin.IRouter) {
+	r.POST("/api/auth/login", h.login)
+	r.GET("/api/users/me", h.me)
 	r.POST("/api/users", h.createUser)
 	r.GET("/api/users", h.listUsers)
 	r.GET("/api/users/:id", h.getUser)
@@ -49,6 +54,9 @@ func (h *Handler) Register(r gin.IRouter) {
 	r.DELETE("/api/rooms/:id/members/:user_id", h.leaveRoom)
 	r.GET("/api/rooms/:id/groups", h.roomGroups)
 	r.POST("/api/rooms/:id/groups", h.createGroup)
+	r.GET("/api/rooms/:id/live-session", h.getLiveSession)
+	r.PUT("/api/rooms/:id/live-session", h.setLiveSession)
+	r.DELETE("/api/rooms/:id/live-session", h.clearLiveSession)
 
 	r.GET("/api/groups/:id", h.getGroup)
 	r.PATCH("/api/groups/:id", h.updateGroup)
@@ -111,10 +119,16 @@ func (h *Handler) fail(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, domain.ErrInvalid):
 		platform.WriteError(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, domain.ErrUnauthenticated), errors.Is(err, domain.ErrWrongCredentials),
+		errors.Is(err, platform.ErrTokenInvalid):
+		platform.WriteError(c, http.StatusUnauthorized, err.Error())
+	case errors.Is(err, domain.ErrForbidden):
+		platform.WriteError(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, domain.ErrWrongAccessKey):
 		platform.WriteError(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, domain.ErrUserNotFound), errors.Is(err, domain.ErrRoomNotFound),
 		errors.Is(err, domain.ErrGroupNotFound), errors.Is(err, domain.ErrPresentationNotFound),
+		errors.Is(err, domain.ErrLiveSessionNotFound),
 		errors.Is(err, domain.ErrNotRoomMember), errors.Is(err, domain.ErrNotGroupMember):
 		platform.WriteError(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, domain.ErrEmailTaken), errors.Is(err, domain.ErrPresentationAssigned),

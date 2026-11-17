@@ -4,7 +4,8 @@ import { Icon } from "../ui/Icon"
 
 type Props = {
   title: string
-  text: string
+  /** Texto del panel izquierdo; admite contenido enriquecido (negritas, enlaces). */
+  text: ReactNode
   /** Enlace de "volver" que se muestra arriba del formulario. */
   back?: { to: string; label: string }
   children: ReactNode

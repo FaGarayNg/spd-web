@@ -18,6 +18,33 @@ export default function CreateRoomPage() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState("")
 
+  // Crear una sala exige una cuenta con sesión iniciada: quien la crea queda como dueño
+  // (anfitrión) en el backend. Un token ausente es sesión anónima (invitado).
+  if (session?.token === undefined) {
+    return (
+      <SplitCard
+        title="Creá una sala para presentar"
+        text="Con el enlace de la sala y la clave, tus invitados entran a ver la presentación en vivo."
+      >
+        <div className="flex flex-col gap-4">
+          <h2 className="text-xl font-semibold text-brand-700">Iniciá sesión para crear una sala</h2>
+          <p className="text-ink/70">
+            El creador de la sala es su anfitrión: es quien arma los grupos y lanza las
+            presentaciones. Necesitamos que tengas una cuenta para asignarte ese rol.
+          </p>
+          <div className="flex gap-3">
+            <Button onClick={() => navigate("/login")}>Iniciar sesión</Button>
+            <Button variant="secondary" onClick={() => navigate("/registro")}>Crear cuenta</Button>
+          </div>
+          <p className="text-sm text-ink/70">
+            ¿Te invitaron a una sala?{" "}
+            <Link to="/unirse" className="font-semibold text-brand-500 hover:underline">Entrá como invitado</Link>
+          </p>
+        </div>
+      </SplitCard>
+    )
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setCreating(true)

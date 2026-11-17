@@ -4,7 +4,7 @@ import { SplitCard } from "../components/layout/SplitCard"
 import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
-import { createUser } from "../services/rooms"
+import { createUser, login } from "../services/rooms"
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -22,11 +22,12 @@ export default function RegisterPage() {
     if (password.length < 8) return setError("La contraseña debe tener al menos 8 caracteres.")
     setSubmitting(true)
     setError("")
-    // POST /api/users: la contraseña queda hasheada en el back. Sin endpoint de login todavía,
-    // la sesión arranca recién creada (el userId sirve para unirse a salas y grupos).
+    // POST /api/users + POST /api/auth/login: la cuenta queda creada y la sesión arranca
+    // autenticada (con token; el backend lo necesita para dejarla crear salas).
     createUser({ fullName: name, email, password })
-      .then((user) => {
-        signIn({ name: user.full_name, userId: user.id })
+      .then(() => login(email, password))
+      .then((result) => {
+        signIn({ name: result.user.full_name, userId: result.user.id, token: result.token })
         navigate("/salas")
       })
       .catch((err: unknown) => {

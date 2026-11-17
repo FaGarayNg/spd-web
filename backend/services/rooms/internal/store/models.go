@@ -38,13 +38,21 @@ type room struct {
 	Name          string `gorm:"size:200;not null"`
 	URL           string `gorm:"size:2048;not null;default:''"`
 	AccessKeyHash string `gorm:"not null;default:''"`
+	// Dueño y anfitrión de la sala; nil en las salas de antes del login.
+	OwnerID *uint `gorm:"index"`
+	// Modo de presentación confirmado: "" sin confirmar, "groups" o "individual".
+	Format string `gorm:"size:20;not null;default:''"`
 }
 
 func (room) TableName() string { return "rooms" }
 
 func (r room) toDomain() domain.Room {
-	return domain.Room{ID: r.ID, Name: r.Name, URL: r.URL, AccessKeyHash: r.AccessKeyHash,
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	var ownerID uint
+	if r.OwnerID != nil {
+		ownerID = *r.OwnerID
+	}
+	return domain.Room{ID: r.ID, Name: r.Name, URL: r.URL, OwnerID: ownerID, Format: r.Format,
+		AccessKeyHash: r.AccessKeyHash, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 }
 
 // roomMember es un DetalleSala. La clave primaria es el par (user_id, room_id): quien vuelve a
@@ -115,6 +123,23 @@ type presentation struct {
 }
 
 func (presentation) TableName() string { return "presentations" }
+
+// liveSession es la sesión en vivo de una sala: qué presentación se está proyectando. Una sala
+// tiene a lo sumo una (RoomID es la clave primaria): lanzar otra reemplaza a la anterior. Son
+// filas físicas, sin DeletedAt: terminar la sesión la borra de verdad, y CreatedAt es el momento
+// en que arrancó (domain.LiveSession.StartedAt).
+type liveSession struct {
+	RoomID         uint   `gorm:"primaryKey"`
+	PresentationID string `gorm:"type:uuid;not null"`
+	CreatedAt      time.Time
+	Room           *room `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+}
+
+func (liveSession) TableName() string { return "live_sessions" }
+
+func (l liveSession) toDomain() domain.LiveSession {
+	return domain.LiveSession{RoomID: l.RoomID, PresentationID: l.PresentationID, StartedAt: l.CreatedAt}
+}
 
 func (p presentation) toDomain() domain.Presentation {
 	return domain.Presentation{ID: p.ID, GroupID: p.GroupID, Slides: nonNil(p.Slides),

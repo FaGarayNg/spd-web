@@ -38,6 +38,9 @@ func run(log *slog.Logger, env *platform.Env) error {
 	dsn := env.String("DATABASE_URL", "postgres://spd:spd@localhost:5432/spd?sslmode=disable")
 	maxConns := env.Int("DB_MAX_CONNS", 10)
 	presentationsURL := env.URL("PRESENTATIONS_URL", "http://localhost:8081")
+	// Secreto de los JWT (login → Authorization). Compartido con cualquier servicio que verifique
+	// sesiones. El default es solo para desarrollo: en producción, un valor propio.
+	tokenSecret := env.String("JWT_SECRET", "dev-secret-solo-para-desarrollo")
 	if err := env.Err(); err != nil {
 		return fmt.Errorf("configuración inválida: %w", err)
 	}
@@ -57,7 +60,7 @@ func run(log *slog.Logger, env *platform.Env) error {
 
 	svc := domain.NewService(store.New(db), catalog.New(presentationsURL, 5*time.Second))
 	engine := platform.NewEngine(log)
-	api.New(svc, log).Register(engine)
+	api.New(svc, log, tokenSecret).Register(engine)
 
 	return platform.Serve(ctx, platform.NewServer(addr, engine, log), log)
 }

@@ -29,6 +29,13 @@ func (s *Store) GetUser(ctx context.Context, id uint) (domain.User, error) {
 	return row.toDomain(), err
 }
 
+// UserByEmail busca por el correo exacto (ya normalizado en minúsculas al crear).
+func (s *Store) UserByEmail(ctx context.Context, email string) (domain.User, error) {
+	var row user
+	err := take(s.db.WithContext(ctx), &row, domain.ErrUserNotFound, "email = ?", email)
+	return row.toDomain(), err
+}
+
 func (s *Store) UpdateUser(ctx context.Context, id uint, ch domain.UserUpdate) (domain.User, error) {
 	changes := map[string]any{}
 	if ch.FullName != nil {
@@ -63,6 +70,8 @@ func (s *Store) DeleteUser(ctx context.Context, id uint) error {
 	})
 }
 
+// UserRooms devuelve las salas del usuario —las que integran y las que son dueñas—, ordenadas
+// por id.
 func (s *Store) UserRooms(ctx context.Context, userID uint) ([]domain.Room, error) {
 	db := s.db.WithContext(ctx)
 	if err := take(db, &user{}, domain.ErrUserNotFound, "id = ?", userID); err != nil {
@@ -70,8 +79,9 @@ func (s *Store) UserRooms(ctx context.Context, userID uint) ([]domain.Room, erro
 	}
 	var rows []room
 	err := db.Select("rooms.*").
-		Joins("JOIN room_members ON room_members.room_id = rooms.id AND room_members.deleted_at IS NULL").
-		Where("room_members.user_id = ?", userID).
+		Joins("LEFT JOIN room_members ON room_members.room_id = rooms.id AND room_members.deleted_at IS NULL").
+		Where("rooms.owner_id = ? OR room_members.user_id = ?", userID, userID).
+		Distinct().
 		Order("rooms.id").Find(&rows).Error
 	return mapList(rows, room.toDomain), err
 }
@@ -88,6 +98,15 @@ func (s *Store) UserGroups(ctx context.Context, userID uint) ([]domain.Group, er
 		Where("group_members.user_id = ?", userID).
 		Order("groups.room_id, groups.priority, groups.id").Find(&rows).Error
 	return mapList(rows, group.toDomain), err
+}
+
+// IsRoomMember dice si el usuario es miembro activo de la sala.
+func (s *Store) IsRoomMember(ctx context.Context, roomID, userID uint) (bool, error) {
+	var n int64
+	err := s.db.WithContext(ctx).Model(&roomMember{}).
+		Where("room_id = ? AND user_id = ?", roomID, userID).
+		Count(&n).Error // las consultas excluyen solas las filas marcadas
+	return n > 0, err
 }
 
 // emailError traduce la violación del índice único de users.email, el único que puede fallar al

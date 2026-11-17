@@ -21,8 +21,12 @@ producción, un reverse-proxy debe publicar `/api` y `/ws` hacia el gateway.
   view models de la UI derivados de ellos.
 
 Pendientes para cuando crezca el backend: endpoint de login (la sesión sigue
-siendo local en `context/SessionContext.tsx`) y "unirse a sala por clave" sin
-conocer el id (ver TODO en `pages/GuestJoinPage.tsx`).
+siendo local en `context/SessionContext.tsx`). El flujo de invitado ya es real:
+`/unirse?sala=<id>` muestra la sala y solo pide la clave; crea una identidad
+efímera (`POST /api/users` con nombre, email y contraseña autogenerados) y une
+con `POST /api/rooms/:id/members` validando la clave (403 = clave incorrecta).
+Las claves de sala se recuerdan por dispositivo (`utils/accessKey.ts`) porque el
+backend solo guarda el hash.
 
 Estructura: `pages/` (pantallas), `components/` (ui, layout, live, rooms),
 `services/` (acceso al gateway), `types/`, `styles/`.

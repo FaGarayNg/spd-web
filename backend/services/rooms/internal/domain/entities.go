@@ -23,14 +23,25 @@ type User struct {
 
 // Room es una sala (Sala). AccessKeyHash es el hash bcrypt de la clave de ingreso, vacío si la
 // sala no tiene clave. Nunca se serializa: la API solo dice si existe (has_access_key).
+// OwnerID es quién la creó y hace de anfitrión: 0 en salas sin dueño (nadie puede
+// administrarlas por la API). Format es el modo de presentación confirmado ("" mientras el
+// anfitrión no lo eligió): es público porque los invitados tienen que ver la sala armarse.
 type Room struct {
 	ID            uint      `json:"id"`
 	Name          string    `json:"name"`
 	URL           string    `json:"url"`
+	OwnerID       uint      `json:"owner_id"`
+	Format        string    `json:"format"`
 	AccessKeyHash string    `json:"-"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
+
+// Formatos de presentación confirmables en una sala.
+const (
+	FormatGroups     = "groups"     // la clase se organiza en grupos (tarjetas por grupo)
+	FormatIndividual = "individual" // cada participante carga y presenta lo suyo
+)
 
 // HasAccessKey indica si la sala pide clave de ingreso.
 func (r Room) HasAccessKey() bool { return r.AccessKeyHash != "" }

@@ -39,7 +39,10 @@ func Register(r gin.IRouter, up Upstreams, log *slog.Logger) {
 	r.GET("/ws/presentation/:id", realtime)
 
 	// Dominio "salas": usuarios, salas y sus miembros, grupos y sus integrantes, presentaciones
-	// asignadas.
+	// asignadas. La autenticación (login, quién soy) también es del servicio rooms; el gateway
+	// solo reenvía la cabecera Authorization: cada servicio verifica sus propios JWT.
+	r.POST("/api/auth/login", rooms)
+	r.GET("/api/users/me", rooms)
 	r.POST("/api/users", rooms)
 	r.GET("/api/users", rooms)
 	r.GET("/api/users/:id", rooms)
@@ -58,6 +61,9 @@ func Register(r gin.IRouter, up Upstreams, log *slog.Logger) {
 	r.DELETE("/api/rooms/:id/members/:user_id", rooms)
 	r.GET("/api/rooms/:id/groups", rooms)
 	r.POST("/api/rooms/:id/groups", rooms)
+	r.GET("/api/rooms/:id/live-session", rooms)
+	r.PUT("/api/rooms/:id/live-session", rooms)
+	r.DELETE("/api/rooms/:id/live-session", rooms)
 
 	r.GET("/api/groups/:id", rooms)
 	r.PATCH("/api/groups/:id", rooms)

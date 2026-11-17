@@ -48,6 +48,10 @@ var (
 	catalogOK = fakeCatalog{slides: map[string]int{pres5: 5, pres3: 3}}
 )
 
+// ownerID es el dueño de todas las salas que crean los tests del dominio: las reglas de
+// autorización se prueban a fondo en el paquete api (con HTTP y JWT); acá interesa la lógica.
+const ownerID = 1
+
 func newService(t *testing.T, catalog domain.Catalog) *domain.Service {
 	t.Helper()
 	return domain.NewService(store.New(dbtest.Open(t)), catalog)
@@ -66,7 +70,7 @@ func mustUser(t *testing.T, svc *domain.Service, email string) domain.User {
 
 func mustRoom(t *testing.T, svc *domain.Service, in domain.NewRoom) domain.Room {
 	t.Helper()
-	r, err := svc.CreateRoom(ctx, in)
+	r, err := svc.CreateRoom(ctx, ownerID, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +79,7 @@ func mustRoom(t *testing.T, svc *domain.Service, in domain.NewRoom) domain.Room 
 
 func mustGroup(t *testing.T, svc *domain.Service, roomID uint, limit, priority int) domain.Group {
 	t.Helper()
-	g, err := svc.CreateGroup(ctx, roomID, domain.GroupFields{Limit: &limit, Priority: &priority})
+	g, err := svc.CreateGroup(ctx, ownerID, roomID, domain.GroupFields{Limit: &limit, Priority: &priority})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +88,7 @@ func mustGroup(t *testing.T, svc *domain.Service, roomID uint, limit, priority i
 
 func mustAdd(t *testing.T, svc *domain.Service, groupID uint, in domain.NewPresentation) domain.Presentation {
 	t.Helper()
-	p, err := svc.AddPresentation(ctx, groupID, in)
+	p, err := svc.AddPresentation(ctx, ownerID, groupID, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +218,7 @@ func TestRoomAccessKeyAndMembers(t *testing.T) {
 	}
 
 	// Cambiar la clave y después quitarla.
-	if _, err := svc.UpdateRoom(ctx, locked.ID, domain.RoomChanges{AccessKey: ptr("nueva")}); err != nil {
+	if _, err := svc.UpdateRoom(ctx, ownerID, locked.ID, domain.RoomChanges{AccessKey: ptr("nueva")}); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = svc.JoinRoom(ctx, locked.ID, domain.Join{UserID: beto.ID, AccessKey: "1234"})
@@ -222,7 +226,7 @@ func TestRoomAccessKeyAndMembers(t *testing.T) {
 	if _, _, err := svc.JoinRoom(ctx, locked.ID, domain.Join{UserID: beto.ID, AccessKey: "nueva"}); err != nil {
 		t.Fatal(err)
 	}
-	upd, err := svc.UpdateRoom(ctx, locked.ID, domain.RoomChanges{AccessKey: ptr(""), Name: ptr("Clase 1 (abierta)")})
+	upd, err := svc.UpdateRoom(ctx, ownerID, locked.ID, domain.RoomChanges{AccessKey: ptr(""), Name: ptr("Clase 1 (abierta)")})
 	if err != nil || upd.HasAccessKey() || upd.Name != "Clase 1 (abierta)" || upd.URL != locked.URL {
 		t.Fatalf("quitar la clave = %+v, %v", upd, err)
 	}
@@ -240,7 +244,7 @@ func TestRoomAccessKeyAndMembers(t *testing.T) {
 		"URL relativa": {Name: "x", URL: "salas/1"},
 		"clave corta":  {Name: "x", AccessKey: "12"},
 	} {
-		_, err := svc.CreateRoom(ctx, in)
+		_, err := svc.CreateRoom(ctx, ownerID, in)
 		expect(t, name, err, domain.ErrInvalid)
 	}
 }
@@ -258,10 +262,10 @@ func TestGroupsAndPresentations(t *testing.T) {
 		"cupo negativo":    {Limit: ptr(-1), Priority: ptr(1)},
 		"todo por omisión": {},
 	} {
-		_, err := svc.CreateGroup(ctx, r.ID, in)
+		_, err := svc.CreateGroup(ctx, ownerID, r.ID, in)
 		expect(t, name, err, domain.ErrInvalid)
 	}
-	_, err := svc.CreateGroup(ctx, 9999, domain.GroupFields{Limit: ptr(5), Priority: ptr(1)})
+	_, err := svc.CreateGroup(ctx, ownerID, 9999, domain.GroupFields{Limit: ptr(5), Priority: ptr(1)})
 	expect(t, "sala inexistente", err, domain.ErrRoomNotFound)
 
 	// Los grupos se listan en el orden en que pasan a presentar: prioridad 1 primero y, a igual
@@ -283,14 +287,14 @@ func TestGroupsAndPresentations(t *testing.T) {
 	if got := order(); !slices.Equal(got, []uint{first.ID, third.ID, tie.ID}) {
 		t.Fatalf("orden de paso = %v", got)
 	}
-	upd, err := svc.UpdateGroup(ctx, tie.ID, domain.GroupFields{Priority: ptr(2)})
+	upd, err := svc.UpdateGroup(ctx, ownerID, tie.ID, domain.GroupFields{Priority: ptr(2)})
 	if err != nil || upd.Priority != 2 || upd.Limit != 8 {
 		t.Fatalf("UpdateGroup = %+v, %v", upd, err)
 	}
 	if got := order(); !slices.Equal(got, []uint{first.ID, tie.ID, third.ID}) {
 		t.Fatalf("orden de paso tras cambiar la prioridad = %v", got)
 	}
-	_, err = svc.UpdateGroup(ctx, tie.ID, domain.GroupFields{Limit: ptr(0)})
+	_, err = svc.UpdateGroup(ctx, ownerID, tie.ID, domain.GroupFields{Limit: ptr(0)})
 	expect(t, "dejar el cupo en cero", err, domain.ErrInvalid)
 
 	// Sin slides se asignan todas las diapositivas; el UUID se normaliza.
@@ -299,7 +303,7 @@ func TestGroupsAndPresentations(t *testing.T) {
 	if p.ID != pres5 || p.GroupID != g1.ID || !slices.Equal(p.Slides, []int32{1, 2, 3, 4, 5}) {
 		t.Fatalf("presentación = %+v", p)
 	}
-	_, err = svc.AddPresentation(ctx, g2.ID, domain.NewPresentation{PresentationID: pres5})
+	_, err = svc.AddPresentation(ctx, ownerID, g2.ID, domain.NewPresentation{PresentationID: pres5})
 	expect(t, "asignar a dos grupos", err, domain.ErrPresentationAssigned)
 
 	p3 := mustAdd(t, svc, g1.ID, domain.NewPresentation{PresentationID: pres3, Slides: &[]int32{3, 1}})
@@ -307,14 +311,14 @@ func TestGroupsAndPresentations(t *testing.T) {
 		t.Fatalf("diapositivas elegidas = %v", p3.Slides)
 	}
 	for name, slides := range map[string][]int32{"fuera de rango": {4}, "cero": {0}, "repetida": {1, 1}} {
-		_, err := svc.UpdatePresentation(ctx, g1.ID, pres3, domain.PresentationChanges{Slides: &slides})
+		_, err := svc.UpdatePresentation(ctx, ownerID, g1.ID, pres3, domain.PresentationChanges{Slides: &slides})
 		expect(t, name, err, domain.ErrInvalid)
 	}
-	_, err = svc.AddPresentation(ctx, g1.ID, domain.NewPresentation{PresentationID: unknown})
+	_, err = svc.AddPresentation(ctx, ownerID, g1.ID, domain.NewPresentation{PresentationID: unknown})
 	expect(t, "presentación inexistente", err, domain.ErrPresentationUnknown)
-	_, err = svc.AddPresentation(ctx, g1.ID, domain.NewPresentation{PresentationID: "no-es-un-uuid"})
+	_, err = svc.AddPresentation(ctx, ownerID, g1.ID, domain.NewPresentation{PresentationID: "no-es-un-uuid"})
 	expect(t, "id que no es UUID", err, domain.ErrInvalid)
-	_, err = svc.AddPresentation(ctx, 9999, domain.NewPresentation{PresentationID: unknown})
+	_, err = svc.AddPresentation(ctx, ownerID, 9999, domain.NewPresentation{PresentationID: unknown})
 	expect(t, "grupo inexistente (antes que la presentación)", err, domain.ErrGroupNotFound)
 
 	if list, err := svc.GroupPresentations(ctx, g1.ID); err != nil || len(list) != 2 || list[0].ID != pres5 || list[1].ID != pres3 {
@@ -323,22 +327,22 @@ func TestGroupsAndPresentations(t *testing.T) {
 	_, err = svc.GetPresentation(ctx, g2.ID, pres3)
 	expect(t, "presentación de otro grupo", err, domain.ErrPresentationNotFound)
 
-	empty, err := svc.UpdatePresentation(ctx, g1.ID, pres5, domain.PresentationChanges{Slides: &[]int32{}})
+	empty, err := svc.UpdatePresentation(ctx, ownerID, g1.ID, pres5, domain.PresentationChanges{Slides: &[]int32{}})
 	if data, _ := json.Marshal(empty); err != nil || !bytes.Contains(data, []byte(`"slides":[]`)) {
 		t.Fatalf("sin diapositivas: %s, %v", data, err)
 	}
 
 	// Quitada de un grupo, la presentación se puede asignar a otro.
-	if err := svc.RemovePresentation(ctx, g1.ID, pres5); err != nil {
+	if err := svc.RemovePresentation(ctx, ownerID, g1.ID, pres5); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, "quitar dos veces", svc.RemovePresentation(ctx, g1.ID, pres5), domain.ErrPresentationNotFound)
+	expect(t, "quitar dos veces", svc.RemovePresentation(ctx, ownerID, g1.ID, pres5), domain.ErrPresentationNotFound)
 	if moved := mustAdd(t, svc, g2.ID, domain.NewPresentation{PresentationID: pres5, Slides: &[]int32{2}}); moved.GroupID != g2.ID {
 		t.Fatalf("reasignada = %+v", moved)
 	}
 
 	// Borrar un grupo borra sus presentaciones.
-	if err := svc.DeleteGroup(ctx, g1.ID); err != nil {
+	if err := svc.DeleteGroup(ctx, ownerID, g1.ID); err != nil {
 		t.Fatal(err)
 	}
 	_, err = svc.GetGroup(ctx, g1.ID)
@@ -423,9 +427,9 @@ func TestGroupMembers(t *testing.T) {
 	}
 
 	// El cupo no puede quedar por debajo de los integrantes actuales.
-	_, err = svc.UpdateGroup(ctx, g.ID, domain.GroupFields{Limit: ptr(1)})
+	_, err = svc.UpdateGroup(ctx, ownerID, g.ID, domain.GroupFields{Limit: ptr(1)})
 	expect(t, "cupo menor que los integrantes", err, domain.ErrLimitBelowMembers)
-	if upd, err := svc.UpdateGroup(ctx, g.ID, domain.GroupFields{Limit: ptr(3)}); err != nil || upd.Limit != 3 {
+	if upd, err := svc.UpdateGroup(ctx, ownerID, g.ID, domain.GroupFields{Limit: ptr(3)}); err != nil || upd.Limit != 3 {
 		t.Fatalf("ampliar el cupo = %+v, %v", upd, err)
 	}
 	if _, _, err := join(g.ID, caro); err != nil {
@@ -451,7 +455,7 @@ func TestGroupMembers(t *testing.T) {
 	if members, _ := svc.GroupMembers(ctx, g.ID); len(members) != 0 {
 		t.Fatalf("integrantes tras borrar a beto = %+v", members)
 	}
-	if err := svc.DeleteGroup(ctx, gOther.ID); err != nil {
+	if err := svc.DeleteGroup(ctx, ownerID, gOther.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := groupIDs(ana); len(got) != 0 {
@@ -465,7 +469,7 @@ func TestCatalogUnavailable(t *testing.T) {
 	svc := newService(t, fakeCatalog{err: errors.New("connection refused")})
 	r := mustRoom(t, svc, domain.NewRoom{Name: "Clase"})
 	g := mustGroup(t, svc, r.ID, 1, 1)
-	_, err := svc.AddPresentation(ctx, g.ID, domain.NewPresentation{PresentationID: pres5})
+	_, err := svc.AddPresentation(ctx, ownerID, g.ID, domain.NewPresentation{PresentationID: pres5})
 	expect(t, "presentations caído", err, domain.ErrCatalogUnavailable)
 }
 
@@ -484,12 +488,12 @@ func TestDeleteRoomCascades(t *testing.T) {
 	mustAdd(t, svc, g.ID, domain.NewPresentation{PresentationID: pres5})
 	mustAdd(t, svc, kept.ID, domain.NewPresentation{PresentationID: pres3})
 
-	if err := svc.DeleteRoom(ctx, r.ID); err != nil {
+	if err := svc.DeleteRoom(ctx, ownerID, r.ID); err != nil {
 		t.Fatal(err)
 	}
 	_, err := svc.GetRoom(ctx, r.ID)
 	expect(t, "sala borrada", err, domain.ErrRoomNotFound)
-	expect(t, "borrar dos veces", svc.DeleteRoom(ctx, r.ID), domain.ErrRoomNotFound)
+	expect(t, "borrar dos veces", svc.DeleteRoom(ctx, ownerID, r.ID), domain.ErrRoomNotFound)
 	_, err = svc.GetGroup(ctx, g.ID)
 	expect(t, "grupo de la sala", err, domain.ErrGroupNotFound)
 	_, err = svc.GetPresentation(ctx, g.ID, pres5)
@@ -502,7 +506,7 @@ func TestDeleteRoomCascades(t *testing.T) {
 	}
 
 	// Una sala borrada no admite hijos nuevos, y su presentación quedó libre.
-	_, err = svc.CreateGroup(ctx, r.ID, domain.GroupFields{Limit: ptr(1), Priority: ptr(1)})
+	_, err = svc.CreateGroup(ctx, ownerID, r.ID, domain.GroupFields{Limit: ptr(1), Priority: ptr(1)})
 	expect(t, "grupo en sala borrada", err, domain.ErrRoomNotFound)
 	_, _, err = svc.JoinRoom(ctx, r.ID, domain.Join{UserID: ana.ID})
 	expect(t, "unirse a sala borrada", err, domain.ErrRoomNotFound)

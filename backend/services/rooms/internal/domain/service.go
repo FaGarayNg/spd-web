@@ -16,6 +16,17 @@ var (
 	ErrPresentationNotFound = errors.New("presentación no encontrada en el grupo")
 	ErrNotRoomMember        = errors.New("el usuario no es miembro de la sala")
 	ErrNotGroupMember       = errors.New("el usuario no es integrante del grupo")
+	ErrLiveSessionNotFound  = errors.New("la sala no tiene una presentación en vivo")
+
+	// Autorización: la identidad llega en la cabecera Authorization (un JWT que valida el
+	// propio servicio; el gateway solo la reenvía). Sin sesión es 401; con sesión pero sin
+	// permiso sobre la sala es 403.
+	ErrUnauthenticated = errors.New("hay que iniciar sesión para hacer eso")
+	ErrForbidden       = errors.New("solo el anfitrión de la sala puede hacer eso")
+
+	// Login: el mismo mensaje para correo inexistente y contraseña incorrecta, para no
+	// revelar qué cuentas existen.
+	ErrWrongCredentials = errors.New("correo o contraseña incorrectos")
 
 	ErrEmailTaken             = errors.New("ya existe un usuario con ese correo")
 	ErrPresentationAssigned   = errors.New("la presentación ya está asignada")
@@ -45,6 +56,8 @@ type Store interface {
 	CreateUser(ctx context.Context, u User) (User, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	GetUser(ctx context.Context, id uint) (User, error)
+	// UserByEmail busca por el correo (único entre los activos): la puerta del login.
+	UserByEmail(ctx context.Context, email string) (User, error)
 	UpdateUser(ctx context.Context, id uint, ch UserUpdate) (User, error)
 	DeleteUser(ctx context.Context, id uint) error
 	UserRooms(ctx context.Context, userID uint) ([]Room, error)
@@ -78,6 +91,17 @@ type Store interface {
 	GetPresentation(ctx context.Context, groupID uint, id string) (Presentation, error)
 	SetSlides(ctx context.Context, groupID uint, id string, slides []int32) (Presentation, error)
 	RemovePresentation(ctx context.Context, groupID uint, id string) error
+
+	// SetLiveSession marca qué presentación se proyecta en la sala (reemplaza la anterior:
+	// StartedAt queda en el momento del alta). LiveSession devuelve ErrLiveSessionNotFound si
+	// la sala no tiene ninguna. ClearLiveSession borra la que haya (idempotente).
+	SetLiveSession(ctx context.Context, ls LiveSession) (LiveSession, error)
+	LiveSession(ctx context.Context, roomID uint) (LiveSession, error)
+	ClearLiveSession(ctx context.Context, roomID uint) error
+
+	// IsRoomMember dice si el usuario es (miembro activo de) una sala: las acciones de
+	// integrante, como asignar la presentación de un grupo, la exigen.
+	IsRoomMember(ctx context.Context, roomID, userID uint) (bool, error)
 }
 
 // UserUpdate son los cambios ya validados de un usuario; los nil no cambian.
@@ -94,6 +118,7 @@ type RoomUpdate struct {
 	Name          *string
 	URL           *string
 	AccessKeyHash *string
+	Format        *string
 }
 
 // Catalog consulta las presentaciones del servicio presentations (lo implementa el paquete

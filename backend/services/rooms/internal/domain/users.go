@@ -1,6 +1,10 @@
 package domain
 
-import "context"
+import (
+	"context"
+
+	"golang.org/x/crypto/bcrypt"
+)
 
 // NewUser son los datos de alta de un usuario.
 type NewUser struct {
@@ -16,6 +20,30 @@ type UserChanges struct {
 	Email    *string   `json:"email"`
 	Password *string   `json:"password"`
 	Roles    *[]string `json:"roles"`
+}
+
+// Credentials son los datos del login.
+type Credentials struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// Login verifica el correo y la contraseña contra el hash bcrypt guardado y devuelve el
+// usuario. El mismo error para correo inexistente y contraseña incorrecta (ErrWrongCredentials):
+// así nadie averigua qué cuentas existen probando correos.
+func (s *Service) Login(ctx context.Context, in Credentials) (User, error) {
+	email, err := checkEmail(in.Email)
+	if err != nil {
+		return User{}, ErrWrongCredentials // ni siquiera decimos que el correo es inválido
+	}
+	u, err := s.store.UserByEmail(ctx, email)
+	if err != nil {
+		return User{}, ErrWrongCredentials
+	}
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Password)) != nil {
+		return User{}, ErrWrongCredentials
+	}
+	return u, nil
 }
 
 // CreateUser da de alta un usuario. El correo se normaliza en minúsculas y la contraseña se

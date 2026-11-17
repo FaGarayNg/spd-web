@@ -3,13 +3,13 @@ import { useNavigate } from "react-router-dom"
 import { RoomCard } from "../components/rooms/RoomCard"
 import { Button } from "../components/ui/Button"
 import { useSession } from "../context/SessionContext"
-import { getRoomMembers, getRooms, getUserRooms } from "../services/rooms"
+import { getRoomMembers, getUserRooms } from "../services/rooms"
 import type { Role, Room } from "../types"
 
 const TABS: { role: Role; label: string; empty: string }[] = [
-  // Sin "dueño" de sala en el backend: la pestaña de anfitrión lista todas las salas y la de
-  // invitado las que tienen a la sesión como miembro.
-  { role: "host", label: "Anfitrión", empty: "Todavía no hay ninguna sala." },
+  // El backend ya sabe quién es dueño de cada sala: la pestaña de anfitrión filtra las salas
+  // propias y la de invitado las que integra sin ser su dueño.
+  { role: "host", label: "Anfitrión", empty: "Todavía no creaste ninguna sala." },
   {
     role: "guest",
     label: "Invitado",
@@ -30,9 +30,15 @@ export default function RoomsPage() {
     let active = true
     setLoading(true)
     setError("")
-    // Anfitrión: todas. Invitado: las de la sesión, si tiene un usuario real en el back.
+    // Con sesión real o de invitado: las salas del usuario, filtradas por el rol de la pestaña.
+    // Sin usuario (ni cuenta ni invitado): nada que mostrar todavía.
+    const userId = session?.userId
     const request =
-      role === "host" || session?.userId === undefined ? getRooms() : getUserRooms(session.userId)
+      userId === undefined
+        ? Promise.resolve([] as Room[])
+        : getUserRooms(userId).then((list) =>
+            list.filter((room) => (role === "host" ? room.ownerId === userId : room.ownerId !== userId)),
+          )
     request
       .then((result) => {
         if (!active) return

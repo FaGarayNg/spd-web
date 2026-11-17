@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -27,6 +28,8 @@ const (
 	pres    = "6f1c1a52-2a0e-4b6b-9a59-6a1d8f3f1c11" // 4 diapositivas
 	unknown = "11111111-2222-4333-8444-555555555555" // no existe en presentations
 	downPID = "22222222-3333-4444-8555-666666666666" // presentations no responde
+	// Secreto de los JWT de test: el mismo que newServer le pasa al Handler.
+	testSecret = "test-secret"
 )
 
 type fakeCatalog struct{}
@@ -46,15 +49,15 @@ func newServer(t *testing.T) *httptest.Server {
 	gin.SetMode(gin.TestMode)
 	log := slog.New(slog.DiscardHandler)
 	engine := platform.NewEngine(log)
-	New(domain.NewService(store.New(dbtest.Open(t)), fakeCatalog{}), log).Register(engine)
+	New(domain.NewService(store.New(dbtest.Open(t)), fakeCatalog{}), log, testSecret).Register(engine)
 	srv := httptest.NewServer(engine)
 	t.Cleanup(srv.Close)
 	return srv
 }
 
-// call envía la petición (body se codifica como JSON salvo que ya sea un string) y devuelve la
-// respuesta con su cuerpo.
-func call(t *testing.T, srv *httptest.Server, method, path string, body any) (*http.Response, []byte) {
+// call envía la petición (body se codifica como JSON salvo que ya sea un string; headers se
+// copan tal cual) y devuelve la respuesta con su cuerpo.
+func call(t *testing.T, srv *httptest.Server, method, path string, body any, headers ...map[string]string) (*http.Response, []byte) {
 	t.Helper()
 	var r io.Reader
 	switch b := body.(type) {
@@ -67,6 +70,11 @@ func call(t *testing.T, srv *httptest.Server, method, path string, body any) (*h
 	}
 	req, _ := http.NewRequest(method, srv.URL+path, r)
 	req.Header.Set("Content-Type", "application/json")
+	for _, h := range headers {
+		for k, v := range h {
+			req.Header.Set(k, v)
+		}
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -77,15 +85,30 @@ func call(t *testing.T, srv *httptest.Server, method, path string, body any) (*h
 }
 
 // want comprueba el estado y devuelve el cuerpo decodificado como objeto JSON.
-func want(t *testing.T, srv *httptest.Server, status int, method, path string, body any) map[string]any {
+func want(t *testing.T, srv *httptest.Server, status int, method, path string, body any, headers ...map[string]string) map[string]any {
 	t.Helper()
-	resp, data := call(t, srv, method, path, body)
+	resp, data := call(t, srv, method, path, body, headers...)
 	if resp.StatusCode != status {
 		t.Fatalf("%s %s = %d %s; se esperaba %d", method, path, resp.StatusCode, data, status)
 	}
 	var out map[string]any
 	_ = json.Unmarshal(data, &out)
 	return out
+}
+
+// session es la cabecera Authorization que representa al usuario (el token lo firma el propio
+// test con el secreto del server; equivale a lo que el login devolvería).
+func session(t *testing.T, userID any) map[string]string {
+	t.Helper()
+	id, ok := userID.(float64)
+	if !ok {
+		t.Fatalf("session espera un id numérico de la API, got %T", userID)
+	}
+	token, err := platform.IssueToken(testSecret, uint(id), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{"Authorization": "Bearer " + token}
 }
 
 func TestUserEndpoints(t *testing.T) {
@@ -163,13 +186,29 @@ func TestRoomsGroupsAndPresentations(t *testing.T) {
 	user := want(t, srv, http.StatusCreated, http.MethodPost, "/api/users", map[string]any{
 		"full_name": "Ana", "email": "ana@example.com", "password": "secreta123"})
 	uid := user["id"]
+	ana := session(t, uid)
 
+	// Solo con sesión: el creador queda como dueño (anfitrión) de la sala.
+	want(t, srv, http.StatusUnauthorized, http.MethodPost, "/api/rooms", map[string]any{"name": "Anónima"})
 	r := want(t, srv, http.StatusCreated, http.MethodPost, "/api/rooms", map[string]any{
-		"name": "Clase 1", "url": "https://spd.example/salas/clase-1", "access_key": "1234"})
-	if r["has_access_key"] != true || r["access_key"] != nil || r["access_key_hash"] != nil {
+		"name": "Clase 1", "url": "https://spd.example/salas/clase-1", "access_key": "1234"}, ana)
+	if r["has_access_key"] != true || r["access_key"] != nil || r["access_key_hash"] != nil || r["owner_id"] != uid {
 		t.Fatalf("sala = %v", r)
 	}
+	if r["format"] != "" {
+		t.Fatalf("sala nueva sin formato confirmado: %v", r)
+	}
 	rid := fmt.Sprint(r["id"])
+
+	// Confirmar el formato es cosa del anfitrión (anónimo 401), y el valor tiene que ser uno de
+	// los dos válidos.
+	want(t, srv, http.StatusUnauthorized, http.MethodPatch, "/api/rooms/"+rid, map[string]any{"format": domain.FormatGroups})
+	want(t, srv, http.StatusBadRequest, http.MethodPatch, "/api/rooms/"+rid, map[string]any{"format": "otro"}, ana)
+	if got := want(t, srv, http.StatusOK, http.MethodPatch, "/api/rooms/"+rid, map[string]any{"format": domain.FormatGroups}, ana); got["format"] != domain.FormatGroups {
+		t.Fatalf("PATCH formato = %v", got)
+	}
+	// Sin sesión no se puede ni confirmarlo.
+	want(t, srv, http.StatusUnauthorized, http.MethodPatch, "/api/rooms/"+rid, map[string]any{"format": domain.FormatGroups})
 
 	// Miembros (DetalleSala).
 	members := "/api/rooms/" + rid + "/members"
@@ -191,41 +230,52 @@ func TestRoomsGroupsAndPresentations(t *testing.T) {
 	want(t, srv, http.StatusNoContent, http.MethodDelete, fmt.Sprintf("%s/%v", members, uid), nil)
 	want(t, srv, http.StatusNotFound, http.MethodDelete, fmt.Sprintf("%s/%v", members, uid), nil)
 
-	// Grupos.
-	resp, data := call(t, srv, http.MethodPost, "/api/rooms/"+rid+"/groups", map[string]any{"limit": 30, "priority": 1})
+	// Grupos: armar la grilla es cosa del anfitrión; un miembro cualquiera no puede.
+	resp, data := call(t, srv, http.MethodPost, "/api/rooms/"+rid+"/groups", map[string]any{"limit": 30, "priority": 1}, ana)
 	var g map[string]any
 	_ = json.Unmarshal(data, &g)
 	gid := fmt.Sprint(g["id"])
 	if resp.StatusCode != http.StatusCreated || resp.Header.Get("Location") != "/api/groups/"+gid {
 		t.Fatalf("grupo = %d %s (Location %q)", resp.StatusCode, data, resp.Header.Get("Location"))
 	}
-	want(t, srv, http.StatusBadRequest, http.MethodPost, "/api/rooms/"+rid+"/groups", map[string]any{"priority": 1})
-	want(t, srv, http.StatusBadRequest, http.MethodPost, "/api/rooms/"+rid+"/groups", map[string]any{"limit": 0, "priority": 1})
-	if got := want(t, srv, http.StatusOK, http.MethodPatch, "/api/groups/"+gid, map[string]any{"limit": 25}); got["limit"] != 25.0 || got["priority"] != 1.0 {
+	otro := session(t, want(t, srv, http.StatusCreated, http.MethodPost, "/api/users", map[string]any{
+		"full_name": "Beto", "email": "beto@example.com", "password": "secreta123"})["id"])
+	want(t, srv, http.StatusForbidden, http.MethodPost, "/api/rooms/"+rid+"/groups", map[string]any{"limit": 30, "priority": 2}, otro)
+	want(t, srv, http.StatusBadRequest, http.MethodPost, "/api/rooms/"+rid+"/groups", map[string]any{"priority": 1}, ana)
+	want(t, srv, http.StatusBadRequest, http.MethodPost, "/api/rooms/"+rid+"/groups", map[string]any{"limit": 0, "priority": 1}, ana)
+	if got := want(t, srv, http.StatusOK, http.MethodPatch, "/api/groups/"+gid, map[string]any{"limit": 25}, ana); got["limit"] != 25.0 || got["priority"] != 1.0 {
 		t.Fatalf("PATCH grupo = %v", got)
 	}
+	want(t, srv, http.StatusForbidden, http.MethodPatch, "/api/groups/"+gid, map[string]any{"limit": 25}, otro)
 
-	// Presentaciones asignadas al grupo.
+	// Presentaciones asignadas al grupo: las asigna el dueño; beto (que no es miembro de la
+	// sala) no puede, aunque el PATCH de diapositivas sí queda en manos de quien pertenece.
 	list := "/api/groups/" + gid + "/presentations"
-	resp, data = call(t, srv, http.MethodPost, list, map[string]any{"presentation_id": pres, "slides": []int{2, 4}})
+	want(t, srv, http.StatusForbidden, http.MethodPost, list, map[string]any{"presentation_id": pres}, otro)
+	resp, data = call(t, srv, http.MethodPost, list, map[string]any{"presentation_id": pres, "slides": []int{2, 4}}, ana)
 	if resp.StatusCode != http.StatusCreated || resp.Header.Get("Location") != list+"/"+pres || !bytes.Contains(data, []byte(`"slides":[2,4]`)) {
 		t.Fatalf("asignar = %d %s (Location %q)", resp.StatusCode, data, resp.Header.Get("Location"))
 	}
-	want(t, srv, http.StatusConflict, http.MethodPost, list, map[string]any{"presentation_id": pres})
-	want(t, srv, http.StatusBadRequest, http.MethodPost, list, map[string]any{"presentation_id": unknown[:8]})
-	want(t, srv, http.StatusUnprocessableEntity, http.MethodPost, list, map[string]any{"presentation_id": unknown})
-	down := want(t, srv, http.StatusServiceUnavailable, http.MethodPost, list, map[string]any{"presentation_id": downPID})
+	want(t, srv, http.StatusConflict, http.MethodPost, list, map[string]any{"presentation_id": pres}, ana)
+	want(t, srv, http.StatusBadRequest, http.MethodPost, list, map[string]any{"presentation_id": unknown[:8]}, ana)
+	want(t, srv, http.StatusUnprocessableEntity, http.MethodPost, list, map[string]any{"presentation_id": unknown}, ana)
+	down := want(t, srv, http.StatusServiceUnavailable, http.MethodPost, list, map[string]any{"presentation_id": downPID}, ana)
 	if down["error"] != domain.ErrCatalogUnavailable.Error() {
 		t.Fatalf("503 debe dar el mensaje genérico, sin detalles internos: %v", down)
 	}
-	if got := want(t, srv, http.StatusOK, http.MethodPatch, list+"/"+pres, map[string]any{"slides": []int{1}}); fmt.Sprint(got["slides"]) != "[1]" {
+	if got := want(t, srv, http.StatusOK, http.MethodPatch, list+"/"+pres, map[string]any{"slides": []int{1}}, ana); fmt.Sprint(got["slides"]) != "[1]" {
 		t.Fatalf("PATCH diapositivas = %v", got)
 	}
-	want(t, srv, http.StatusBadRequest, http.MethodPatch, list+"/"+pres, map[string]any{"slides": []int{5}})
+	want(t, srv, http.StatusBadRequest, http.MethodPatch, list+"/"+pres, map[string]any{"slides": []int{5}}, ana)
 	want(t, srv, http.StatusOK, http.MethodGet, list+"/"+pres, nil)
 
-	// Borrar la sala borra en cascada su grupo y la presentación asignada.
-	want(t, srv, http.StatusNoContent, http.MethodDelete, "/api/rooms/"+rid, nil)
+	// Desasignar es cosa del anfitrión (aunque beto sea miembro de la sala).
+	want(t, srv, http.StatusForbidden, http.MethodDelete, list+"/"+pres, nil, otro)
+	want(t, srv, http.StatusNoContent, http.MethodDelete, list+"/"+pres, nil, ana)
+
+	// Borrar la sala borra en cascada su grupo y la presentación asignada; solo el anfitrión puede.
+	want(t, srv, http.StatusForbidden, http.MethodDelete, "/api/rooms/"+rid, nil, otro)
+	want(t, srv, http.StatusNoContent, http.MethodDelete, "/api/rooms/"+rid, nil, ana)
 	want(t, srv, http.StatusNotFound, http.MethodGet, "/api/rooms/"+rid, nil)
 	want(t, srv, http.StatusNotFound, http.MethodGet, "/api/groups/"+gid, nil)
 	want(t, srv, http.StatusNotFound, http.MethodGet, list+"/"+pres, nil)
@@ -238,9 +288,9 @@ func TestGroupMemberEndpoints(t *testing.T) {
 			"full_name": email, "email": email, "password": "secreta123"})["id"]
 	}
 	ana, beto, caro := newUser("ana@example.com"), newUser("beto@example.com"), newUser("caro@example.com")
-	rid := fmt.Sprint(want(t, srv, http.StatusCreated, http.MethodPost, "/api/rooms", map[string]any{"name": "Clase"})["id"])
+	rid := fmt.Sprint(want(t, srv, http.StatusCreated, http.MethodPost, "/api/rooms", map[string]any{"name": "Clase"}, session(t, ana))["id"])
 	gid := fmt.Sprint(want(t, srv, http.StatusCreated, http.MethodPost, "/api/rooms/"+rid+"/groups",
-		map[string]any{"limit": 2, "priority": 1})["id"])
+		map[string]any{"limit": 2, "priority": 1}, session(t, ana))["id"])
 	members := "/api/groups/" + gid + "/members"
 
 	notInRoom := want(t, srv, http.StatusConflict, http.MethodPost, members, map[string]any{"user_id": ana})
@@ -261,7 +311,8 @@ func TestGroupMemberEndpoints(t *testing.T) {
 	if full["error"] != domain.ErrGroupFull.Error()+" (cupo 2)" {
 		t.Fatalf("409 grupo completo = %v", full)
 	}
-	want(t, srv, http.StatusConflict, http.MethodPatch, "/api/groups/"+gid, map[string]any{"limit": 1})
+	want(t, srv, http.StatusConflict, http.MethodPatch, "/api/groups/"+gid, map[string]any{"limit": 1}, session(t, ana))
+	want(t, srv, http.StatusForbidden, http.MethodPatch, "/api/groups/"+gid, map[string]any{"limit": 2}, session(t, beto))
 	want(t, srv, http.StatusNotFound, http.MethodPost, "/api/groups/9999/members", map[string]any{"user_id": ana})
 
 	if _, data := call(t, srv, http.MethodGet, members, nil); !bytes.Contains(data, []byte(`"full_name":"beto@example.com"`)) ||

@@ -69,6 +69,20 @@ func TestCheckURL(t *testing.T) {
 	}
 }
 
+func TestCheckFormat(t *testing.T) {
+	// Los dos formatos confirmables, y el vacío (sin confirmar todavía).
+	for _, in := range []string{"", FormatGroups, FormatIndividual} {
+		if got, err := checkFormat(in); err != nil || got != in {
+			t.Fatalf("checkFormat(%q) = %q, %v", in, got, err)
+		}
+	}
+	for _, in := range []string{"otro", "grupos", "GROUPS"} {
+		if _, err := checkFormat(in); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("checkFormat(%q): err = %v, se esperaba ErrInvalid", in, err)
+		}
+	}
+}
+
 func TestHashSecret(t *testing.T) {
 	hash, err := hashSecret("password", "contraseña segura", minPassword)
 	if err != nil {

@@ -1,97 +1,116 @@
 import { useEffect, useState, type FormEvent } from "react"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { SplitCard } from "../components/layout/SplitCard"
 import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
-import { createUser, getRoom, joinRoom } from "../services/rooms"
-import type { Room } from "../types"
+import { ApiError } from "../services/http"
+import { createGuestUser, getRoom, joinRoom } from "../services/rooms"
 import { saveRoomKey } from "../utils/accessKey"
+import type { Room } from "../types"
 
-// El back no tiene "invitado": se crea un usuario descartable con rol "guest" para poder usar
-// POST /api/rooms/:id/members y los grupos. Pendiente de definir con el back (deja usuarios sueltos).
-const guestEmail = () => `invitado-${crypto.randomUUID()}@invitados.spd.app`
+// Nombre autogenerado para la identidad efímera: el vínculo con la sala es la clave, no el
+// nombre. Cuando exista inicio de sesión, el usuario va a llegar acá con su cuenta real (o se
+// le va a pedir iniciar sesión o registrarse antes de este formulario) y el nombre va a salir
+// de la cuenta: "Invitado XXXX" queda solo como rótulo temporal en el header.
+function guestName(): string {
+  return `Invitado ${crypto.randomUUID().slice(0, 4).toUpperCase()}`
+}
 
 export default function GuestJoinPage() {
   const navigate = useNavigate()
-  const { session, signIn } = useSession()
-  const roomParam = useSearchParams()[0].get("sala") ?? ""
-  const [roomId, setRoomId] = useState(roomParam)
-  const [room, setRoom] = useState<Room | null>(null)
-  const [name, setName] = useState(session?.name ?? "")
-  const [key, setKey] = useState("")
-  const [error, setError] = useState("")
-  const [submitting, setSubmitting] = useState(false)
+  const { signIn, session } = useSession()
+  const [params] = useSearchParams()
+  // El enlace de invitación (RoomHeader) usa ?sala=; se tolera ?room= por enlaces viejos.
+  const roomId = params.get("sala") ?? params.get("room") ?? ""
 
-  // Si el enlace trae la sala, la consultamos para mostrar su nombre y saber si pide clave.
+  const [room, setRoom] = useState<Room | null | undefined>(undefined)
+  const [key, setKey] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState("")
+
+  // La sala se conoce por el enlace: nombre y si pide clave. Sin ?sala= no hay a qué unirse:
+  // el backend no tiene búsqueda por clave (POST /rooms/:id/members necesita el id).
   useEffect(() => {
-    if (!roomParam) return
+    if (!roomId) return setRoom(null)
     let active = true
-    getRoom(roomParam)
-      .then((result) => {
-        if (active) setRoom(result)
-      })
-      .catch((err: unknown) => {
-        if (active) setError(err instanceof Error ? err.message : "No se pudo cargar la sala.")
-      })
+    setRoom(undefined)
+    getRoom(roomId)
+      .then((result) => active && setRoom(result))
+      .catch(() => active && setRoom(null))
     return () => {
       active = false
     }
-  }, [roomParam])
+  }, [roomId])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const id = Number(roomId)
-    if (!Number.isInteger(id) || id < 1) return setError("Ingresá un número de sala válido.")
+    if (!room) return
     setSubmitting(true)
     setError("")
-    const accessKey = key.trim()
     try {
-      // Con cuenta o invitado previo se reutiliza el usuario; si no, se crea uno.
-      let user: { name: string; userId: number }
-      if (session?.userId !== undefined) {
-        user = { name: session.name, userId: session.userId }
-      } else {
-        const created = await createUser({
-          fullName: name.trim(),
-          email: guestEmail(),
-          password: crypto.randomUUID(),
-          roles: ["guest"],
-        })
-        user = { name: created.full_name, userId: created.id }
+      // 1. Identidad real: si la sesión ya tiene userId (registro o invitación previa) se
+      //    reusa; si no, se crea una cuenta efímera con datos autogenerados.
+      let userId = session?.userId
+      if (userId === undefined) {
+        const user = await createGuestUser(guestName())
+        userId = user.id
+        signIn({ name: user.full_name, userId, guest: true })
       }
-      await joinRoom(id, { userId: user.userId, accessKey })
-      if (accessKey) saveRoomKey(id, accessKey)
-      signIn(user)
-      navigate(`/salas/${id}`, { state: { role: "guest" } })
+      // 2. POST /api/rooms/:id/members: valida la clave con bcrypt y queda como miembro real
+      //    (200 si ya era miembro, 201 si entra ahora). 403 = clave equivocada.
+      await joinRoom(room.id, { userId, accessKey: key || undefined })
+      // El dispositivo recuerda la clave con la que entró: el header de la sala la va a poder
+      // mostrar y copiar (ver utils/accessKey.ts).
+      if (key) saveRoomKey(room.id, key)
+      navigate(`/salas/${room.id}`, { state: { role: "guest" } })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo entrar a la sala.")
+      if (err instanceof ApiError) {
+        if (err.status === 403) setError("La clave no es correcta. Pedile la del anfitrión.")
+        else if (err.status === 404) setError("La sala ya no existe.")
+        else setError(err.message)
+      } else {
+        setError("No se pudo entrar a la sala. Volvé a intentar.")
+      }
       setSubmitting(false)
     }
+  }
+
+  if (room === undefined) return <p className="text-ink/60">Buscando la sala…</p>
+
+  if (room === null) {
+    return (
+      <SplitCard
+        title="Enlace de invitación inválido"
+        text="El enlace no tiene el id de la sala (o la sala ya no existe). Pedile al anfitrión que te reenvíe el enlace completo."
+      >
+        <Link to="/salas" className="font-semibold text-brand-500 hover:underline">Ir a mis salas</Link>
+      </SplitCard>
+    )
   }
 
   return (
     <SplitCard
       title="Todo listo para entrar en sala"
-      text="Ingresá tus datos y unite a la presentación en vivo."
-      back={{ to: "/login", label: "Volver al inicio de sesión" }}
+      text={<>Vas a entrar como invitado a <strong className="text-brand-700">{room.name}</strong>.</>}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-        <h2 className="text-xl font-semibold text-brand-700">
-          {room ? `Unite a «${room.name}»` : "Unite a la sala"}
-        </h2>
-        {!roomParam && (
-          <Field label="Número de sala" inputMode="numeric" placeholder="Ej. 4" value={roomId}
-            onChange={(event) => setRoomId(event.target.value)} required />
+        <h2 className="text-xl font-semibold text-brand-700">Unite a la sala</h2>
+        {room.hasAccessKey ? (
+          <Field label="Clave de la sala" placeholder="Ej. A7K-29P" value={key}
+            onChange={(event) => setKey(event.target.value)} required autoFocus />
+        ) : (
+          <p className="rounded-lg bg-brand-50 p-4 text-sm text-brand-700">
+            Esta sala no pide clave: podés entrar directo.
+          </p>
         )}
-        {session?.userId === undefined && (
-          <Field label="Nombre de usuario" placeholder="¿Cómo te llamás?" value={name}
-            onChange={(event) => setName(event.target.value)} required />
-        )}
-        <Field label="Clave de la sala" placeholder="Ej. A7K-29P" value={key}
-          onChange={(event) => setKey(event.target.value.toUpperCase())} required />
         {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
-        <Button type="submit" disabled={submitting}>{submitting ? "Entrando…" : "Ingresar"}</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? "Entrando…" : "Ingresar"}
+        </Button>
+        <p className="text-sm text-ink/70">
+          ¿Sos el anfitrión? <Link to="/login" className="font-semibold text-brand-500 hover:underline">Iniciá sesión</Link>
+        </p>
       </form>
     </SplitCard>
   )
