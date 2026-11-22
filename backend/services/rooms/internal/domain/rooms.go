@@ -1,0 +1,160 @@
+package domain
+
+import (
+	"context"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+// NewRoom son los datos de alta de una sala. AccessKey vacía: sala sin clave.
+type NewRoom struct {
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	AccessKey string `json:"access_key"`
+}
+
+// RoomChanges son los campos modificables de una sala; los que llegan nil no cambian. Una
+// AccessKey vacía quita la clave. Format confirma el modo de presentación (domain.FormatGroups
+// o domain.FormatIndividual).
+type RoomChanges struct {
+	Name      *string `json:"name"`
+	URL       *string `json:"url"`
+	AccessKey *string `json:"access_key"`
+	Format    *string `json:"format"`
+}
+
+// Join son los datos para unirse a una sala.
+type Join struct {
+	UserID    uint   `json:"user_id"`
+	AccessKey string `json:"access_key"`
+}
+
+// CreateRoom da de alta una sala. La clave de ingreso se guarda como hash bcrypt. Solo con
+// sesión: el creador queda como dueño y hace de anfitrión.
+func (s *Service) CreateRoom(ctx context.Context, ownerID uint, in NewRoom) (Room, error) {
+	if ownerID == 0 {
+		return Room{}, ErrUnauthenticated
+	}
+	var r Room
+	var err error
+	if r.Name, err = checkName("name", in.Name); err != nil {
+		return Room{}, err
+	}
+	if r.URL, err = checkURL(in.URL); err != nil {
+		return Room{}, err
+	}
+	if r.AccessKeyHash, err = accessKeyHash(in.AccessKey); err != nil {
+		return Room{}, err
+	}
+	r.OwnerID = ownerID
+	return s.store.CreateRoom(ctx, r)
+}
+
+// ListRooms devuelve las salas ordenadas por id.
+func (s *Service) ListRooms(ctx context.Context) ([]Room, error) {
+	return s.store.ListRooms(ctx)
+}
+
+// GetRoom devuelve una sala.
+func (s *Service) GetRoom(ctx context.Context, id uint) (Room, error) {
+	return s.store.GetRoom(ctx, id)
+}
+
+// UpdateRoom modifica los campos indicados de una sala. Solo el anfitrión (dueño) puede.
+func (s *Service) UpdateRoom(ctx context.Context, callerID, id uint, in RoomChanges) (Room, error) {
+	r, err := s.store.GetRoom(ctx, id)
+	if err != nil {
+		return Room{}, err
+	}
+	if err := checkOwner(r, callerID); err != nil {
+		return Room{}, err
+	}
+	var ch RoomUpdate
+	if in.Name != nil {
+		v, err := checkName("name", *in.Name)
+		if err != nil {
+			return Room{}, err
+		}
+		ch.Name = &v
+	}
+	if in.URL != nil {
+		v, err := checkURL(*in.URL)
+		if err != nil {
+			return Room{}, err
+		}
+		ch.URL = &v
+	}
+	if in.AccessKey != nil {
+		v, err := accessKeyHash(*in.AccessKey)
+		if err != nil {
+			return Room{}, err
+		}
+		ch.AccessKeyHash = &v
+	}
+	if in.Format != nil {
+		v, err := checkFormat(*in.Format)
+		if err != nil {
+			return Room{}, err
+		}
+		ch.Format = &v
+	}
+	return s.store.UpdateRoom(ctx, id, ch)
+}
+
+// DeleteRoom borra (lógicamente) una sala con sus grupos, las presentaciones de esos grupos y
+// sus miembros. Solo el anfitrión (dueño) puede.
+func (s *Service) DeleteRoom(ctx context.Context, callerID, id uint) error {
+	r, err := s.store.GetRoom(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := checkOwner(r, callerID); err != nil {
+		return err
+	}
+	return s.store.DeleteRoom(ctx, id)
+}
+
+// JoinRoom añade un usuario a una sala; si la sala tiene clave de ingreso, hay que darla. Para
+// quien ya es miembro no cambia nada (created = false); quien vuelve tras salir reactiva su
+// pertenencia.
+//
+// La clave se comprueba ANTES de la transacción: bcrypt tarda decenas de milisegundos a
+// propósito, y hacerlo con la sala bloqueada ocuparía una conexión del pool durante todo ese
+// tiempo (unos cuantos intentos de adivinar la clave dejarían sin conexiones al resto del
+// servicio). Dentro de la transacción basta ver que la clave no cambió entretanto.
+func (s *Service) JoinRoom(ctx context.Context, roomID uint, in Join) (m RoomMember, created bool, err error) {
+	if in.UserID == 0 {
+		return RoomMember{}, false, invalid("user_id es obligatorio")
+	}
+	r, err := s.store.GetRoom(ctx, roomID)
+	if err != nil {
+		return RoomMember{}, false, err
+	}
+	if err := checkAccessKey(r, in.AccessKey); err != nil {
+		return RoomMember{}, false, err
+	}
+	return s.store.AddRoomMember(ctx, roomID, in.UserID, func(locked Room) error {
+		if locked.AccessKeyHash == r.AccessKeyHash {
+			return nil // la misma clave que ya se comprobó
+		}
+		return checkAccessKey(locked, in.AccessKey) // la clave cambió entretanto (raro)
+	})
+}
+
+// checkAccessKey devuelve ErrWrongAccessKey si la sala tiene clave y key no es la correcta.
+func checkAccessKey(r Room, key string) error {
+	if r.HasAccessKey() && bcrypt.CompareHashAndPassword([]byte(r.AccessKeyHash), []byte(key)) != nil {
+		return ErrWrongAccessKey
+	}
+	return nil
+}
+
+// RoomMembers devuelve los miembros de una sala, ordenados por id.
+func (s *Service) RoomMembers(ctx context.Context, roomID uint) ([]Member, error) {
+	return s.store.RoomMembers(ctx, roomID)
+}
+
+// LeaveRoom saca a un usuario de una sala y de los grupos de esa sala.
+func (s *Service) LeaveRoom(ctx context.Context, roomID, userID uint) error {
+	return s.store.RemoveRoomMember(ctx, roomID, userID)
+}
