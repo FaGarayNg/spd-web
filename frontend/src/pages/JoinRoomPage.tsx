@@ -7,6 +7,7 @@ import { useSession } from "../context/SessionContext"
 import { ApiError } from "../services/http"
 import { getRoom, joinRoom } from "../services/rooms"
 import { saveRoomKey } from "../utils/accessKey"
+import { loginPath } from "../utils/redirect"
 import type { Room } from "../types"
 
 // Ingreso a una sala ajena por enlace + clave. A diferencia de antes, no se crea una identidad
@@ -36,8 +37,10 @@ export default function JoinRoomPage() {
   }, [roomId])
 
   // Sin token no hay userId real que mandar al backend: volver al login y regresar acá después.
+  // El destino viaja en ?next= además del state para que no se pierda si el login se recarga.
+  const returnTo = `/unirse?sala=${encodeURIComponent(roomId)}`
   if (session?.token === undefined) {
-    return <Navigate to="/login" state={{ from: `/unirse?sala=${roomId}` }} replace />
+    return <Navigate to={loginPath(returnTo)} state={{ from: returnTo }} replace />
   }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -68,12 +71,13 @@ export default function JoinRoomPage() {
 
   if (room === null) {
     return (
-      <SplitCard
-        title="Enlace de invitación inválido"
-        text="El enlace no tiene el id de la sala (o la sala ya no existe). Pedile al anfitrión que te reenvíe el enlace completo."
-      >
-        <Link to="/salas" className="font-semibold text-brand-500 hover:underline">Ir a mis salas</Link>
-      </SplitCard>
+      <section className="mx-auto max-w-md rounded-lg border border-border bg-surface p-6 text-center">
+        <h1 className="text-lg font-semibold text-brand-700">Enlace de invitación inválido</h1>
+        <p className="mt-2 text-sm text-ink/60">La sala no existe o el enlace está incompleto.</p>
+        <Link to="/salas" className="mt-4 inline-block font-semibold text-brand-500 hover:underline">
+          Volver a mis salas
+        </Link>
+      </section>
     )
   }
 
@@ -100,8 +104,9 @@ export default function JoinRoomPage() {
         <p className="text-sm text-ink/70">
           ¿Querés entrar con otra cuenta?{" "}
           <button type="button" onClick={() => {
+            const backTo = `/unirse?sala=${room.id}`
             signOut()
-            navigate("/login", { state: { from: `/unirse?sala=${room.id}` } })
+            navigate(loginPath(backTo), { state: { from: backTo } })
           }} className="font-semibold text-brand-500 hover:underline">
             Cambiar de cuenta
           </button>

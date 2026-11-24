@@ -42,13 +42,13 @@ export function OwnPresentation({ onUploaded, onStart }: Props) {
   const uploading = status === "uploading"
 
   return (
-    <div className="flex flex-col gap-5 rounded-lg border border-border bg-surface p-6">
+    <div className="flex flex-col gap-5 rounded-lg border border-border bg-surface p-4 sm:p-6">
       <h2 className="text-lg font-semibold text-brand-700">Preparar tu presentación</h2>
       <input ref={inputRef} type="file" accept=".pdf,.pptx" className="hidden" onChange={handleChange} />
       <button
         onClick={() => inputRef.current?.click()}
         disabled={uploading}
-        className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border bg-surface-muted p-10 text-center hover:border-brand-500 disabled:opacity-60"
+        className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border bg-surface-muted p-6 text-center hover:border-brand-500 disabled:opacity-60 sm:p-10"
       >
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-700 text-white">
           <Icon name={status === "done" ? "check" : "upload"} />

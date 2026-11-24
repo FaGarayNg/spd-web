@@ -11,6 +11,36 @@ import type { ApiSlideState, CanvasStroke, Role } from "../types"
 
 type LocationState = { role?: Role; presentationId?: string }
 
+// La API de orientación no está en todos los navegadores (iOS Safari no la expone). Se usa
+// con guardas y, si falla, la presentación sigue funcionando igual.
+type LockableOrientation = {
+  lock?: (orientation: "landscape" | "portrait" | "any") => Promise<void>
+  unlock?: () => void
+}
+
+function orientationApi(): LockableOrientation | undefined {
+  if (typeof screen === "undefined") return undefined
+  return screen.orientation as unknown as LockableOrientation | undefined
+}
+
+async function lockLandscape() {
+  const orientation = orientationApi()
+  if (!orientation?.lock) return
+  try {
+    await orientation.lock("landscape")
+  } catch {
+    // Requiere pantalla completa o no está permitido: se ignora.
+  }
+}
+
+function unlockOrientation() {
+  try {
+    orientationApi()?.unlock?.()
+  } catch {
+    // Sin soporte: no hay nada que liberar.
+  }
+}
+
 export default function LivePage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
@@ -43,7 +73,10 @@ export default function LivePage() {
   const [sessionState, setSessionState] = useState<ApiSlideState | null>(null)
   const [connection, setConnection] = useState<"connecting" | "live" | "ended" | "error">("connecting")
   const [error, setError] = useState("")
-  const stageRef = useRef<HTMLDivElement>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  // El contenedor que pasa a pantalla completa: incluye la diapositiva, las flechas y el
+  // panel de dibujo, así los controles siguen disponibles.
+  const presentationRef = useRef<HTMLDivElement>(null)
   const socketRef = useRef<LiveSocket | null>(null)
   // Detecta el final de la sesión para devolver a todos a la sala. La primera lectura solo
   // inicializa: alguien que entra cuando no hay presentación no debe ser redirigido.
@@ -55,6 +88,50 @@ export default function LivePage() {
     hadLiveRef.current = false
     firstLiveCheckRef.current = true
   }, [id])
+
+  // Pantalla completa: al salir (botón, Escape o gesto del sistema) se libera la orientación.
+  useEffect(() => {
+    const onChange = () => {
+      const active = document.fullscreenElement === presentationRef.current
+      setIsFullscreen(active)
+      if (!active) unlockOrientation()
+    }
+    document.addEventListener("fullscreenchange", onChange)
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange)
+      unlockOrientation()
+    }
+  }, [])
+
+  // En el celular, entrar a pantalla completa gira la pantalla a horizontal de forma
+  // automática. Si el navegador no permite la Fullscreen API (iOS), el contenedor igual
+  // pasa a ocupar toda la pantalla con la clase fija de abajo.
+  const toggleFullscreen = async () => {
+    const element = presentationRef.current
+    if (!element) return
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen()
+      } catch {
+        // El navegador ya salió: el evento fullscreenchange actualiza el estado.
+      }
+      setIsFullscreen(false)
+      unlockOrientation()
+      return
+    }
+    if (isFullscreen) {
+      setIsFullscreen(false)
+      unlockOrientation()
+      return
+    }
+    setIsFullscreen(true)
+    try {
+      await element.requestFullscreen()
+    } catch {
+      // Sin Fullscreen API: se queda el modo expandido por CSS.
+    }
+    await lockLandscape()
+  }
 
   // El espectador consulta la sesión en vivo: sigue la presentación actual y, cuando termina,
   // vuelve automáticamente al inicio de la sala (el anfitrión ya navega al finalizar).
@@ -196,8 +273,8 @@ export default function LivePage() {
 
   if (sessionState === null) {
     return (
-      <div className="flex flex-col gap-5">
-        <h1 className="text-2xl font-semibold text-brand-700">
+      <div className="flex flex-col gap-5 px-4 py-6 sm:p-0">
+        <h1 className="text-xl font-semibold text-brand-700 sm:text-2xl">
           {connection === "connecting" ? "Conectando…" : "Todavía no hay presentación en vivo"}
         </h1>
         {connection === "error" && (
@@ -224,20 +301,53 @@ export default function LivePage() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold text-brand-700">Sala {id}</h1>
-          <span className="rounded-full bg-accent px-3 py-1 text-xs font-bold text-brand-900">
+    <div className="flex h-[100dvh] flex-col gap-3 overflow-hidden px-3 pb-3 pt-2 sm:h-auto sm:gap-5 sm:overflow-visible sm:p-0">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 sm:gap-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <h1 className="hidden truncate text-base font-semibold text-brand-700 sm:block sm:text-2xl">Sala {id}</h1>
+          <span className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[10px] font-bold text-brand-900 sm:px-3 sm:text-xs">
             {connection === "live" ? "EN VIVO" : connection === "connecting" ? "RECONECTANDO" : "DETENIDA"}
           </span>
+          <span className="shrink-0 text-xs text-ink/70 sm:hidden">
+            {sessionState.slide}/{sessionState.slide_count}
+          </span>
         </div>
-        <span className="inline-flex items-center gap-2 text-sm text-ink/70">
-          <Icon name="eye" size={16} /> Diapositiva {sessionState.slide} de {sessionState.slide_count}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="hidden items-center gap-2 text-sm text-ink/70 sm:inline-flex">
+            <Icon name="eye" size={16} /> Diapositiva {sessionState.slide} de {sessionState.slide_count}
+          </span>
+          <div className="flex items-center gap-1.5 sm:hidden">
+            <button type="button" onClick={toggleFullscreen}
+              aria-label={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+              className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-surface text-brand-700">
+              <Icon name={isFullscreen ? "minimize" : "expand"} />
+            </button>
+            <button type="button" onClick={leave} aria-label="Abandonar"
+              className="flex h-10 w-10 items-center justify-center rounded-md border border-border bg-surface text-brand-700">
+              <Icon name="logout" />
+            </button>
+            {isHost && (
+              <button type="button" onClick={finish} aria-label="Finalizar presentación"
+                className="flex h-10 w-10 items-center justify-center rounded-md bg-brand-700 text-white">
+                <Icon name="check" />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div ref={stageRef} className="bg-surface-muted">
+      <div
+        ref={presentationRef}
+        className={`flex min-h-0 flex-1 flex-col gap-3 sm:flex-none ${
+          isFullscreen ? "fixed inset-0 z-50 h-[100dvh] w-screen bg-brand-900 p-2 sm:p-3" : ""
+        }`}
+      >
+        {isFullscreen && (
+          <button type="button" onClick={toggleFullscreen} aria-label="Salir de pantalla completa"
+            className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-brand-900/80 text-white">
+            <Icon name="minimize" />
+          </button>
+        )}
         <SlideStage
           slide={sessionState.slide}
           total={sessionState.slide_count}
@@ -248,29 +358,36 @@ export default function LivePage() {
           onClear={clearAnnotations}
           onPrev={() => send({ action: "prev" })}
           onNext={() => send({ action: "next" })}
+          fill={isFullscreen}
         />
       </div>
 
       {error && connection !== "error" && (
-        <p role="alert" className="rounded-lg bg-brand-50 p-3 text-sm text-brand-700">{error}</p>
-      )}
-
-      {!canControl ? (
-        <p className="flex items-center gap-2 rounded-lg bg-brand-50 p-4 text-sm text-brand-700">
-          <Icon name="eye" />
-          <span><strong>Modo espectador.</strong> Estás viendo la presentación en tiempo real.</span>
+        <p role="alert" className="shrink-0 rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700 sm:p-3 sm:text-sm">
+          {error}
         </p>
-      ) : (
-        !isHost && (
-          <p className="flex items-center gap-2 rounded-lg bg-brand-50 p-4 text-sm text-brand-700">
-            <Icon name="sparkles" />
-            <span><strong>Es tu turno.</strong> Podés avanzar las diapositivas y dibujar sobre ellas.</span>
-          </p>
-        )
       )}
 
-      <div className="flex flex-wrap gap-3">
-        <Button variant="secondary" icon="expand" onClick={() => stageRef.current?.requestFullscreen?.()}>Pantalla completa</Button>
+      <div className="hidden sm:block">
+        {!canControl ? (
+          <p className="flex items-center gap-2 rounded-lg bg-brand-50 p-4 text-sm text-brand-700">
+            <Icon name="eye" />
+            <span><strong>Modo espectador.</strong> Estás viendo la presentación en tiempo real.</span>
+          </p>
+        ) : (
+          !isHost && (
+            <p className="flex items-center gap-2 rounded-lg bg-brand-50 p-4 text-sm text-brand-700">
+              <Icon name="sparkles" />
+              <span><strong>Es tu turno.</strong> Podés avanzar las diapositivas y dibujar sobre ellas.</span>
+            </p>
+          )
+        )}
+      </div>
+
+      <div className="hidden flex-wrap gap-3 sm:flex">
+        <Button variant="secondary" icon={isFullscreen ? "minimize" : "expand"} onClick={toggleFullscreen}>
+          {isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+        </Button>
         <Button variant="secondary" icon="logout" onClick={leave}>Abandonar</Button>
         {isHost && (
           <Button icon="check" onClick={finish}>Finalizar presentación</Button>

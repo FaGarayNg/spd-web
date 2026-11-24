@@ -14,6 +14,8 @@ type Props = {
   onClear: () => void
   onPrev: () => void
   onNext: () => void
+  /** Ocupa todo el alto disponible: visor móvil y pantalla completa. */
+  fill?: boolean
 }
 
 const COLORS = [
@@ -24,7 +26,9 @@ const COLORS = [
 ]
 const W = 1280
 const H = 720
-const tool = "flex h-9 w-9 items-center justify-center rounded-md text-brand-700 hover:bg-brand-50"
+const tool = "flex h-10 w-10 items-center justify-center rounded-md text-brand-700 hover:bg-brand-50 sm:h-9 sm:w-9"
+
+type CanvasBox = { left: number; top: number; width: number; height: number }
 
 function drawStroke(c: CanvasRenderingContext2D, stroke: CanvasStroke) {
   if (stroke.points.length === 0) return
@@ -43,18 +47,33 @@ function drawStroke(c: CanvasRenderingContext2D, stroke: CanvasStroke) {
 }
 
 export function SlideStage({
-  slide, total, url, canControl, annotations, onAnnotation, onClear, onPrev, onNext,
+  slide, total, url, canControl, annotations, onAnnotation, onClear, onPrev, onNext, fill = false,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   const drawing = useRef(false)
   const current = useRef<CanvasStroke | null>(null)
   const lastSent = useRef(0)
   const [eraser, setEraser] = useState(false)
   const [color, setColor] = useState(COLORS[0].value)
   const [broken, setBroken] = useState(false)
+  // Tamaño natural de la imagen y rectángulo donde se está mostrando (object-contain).
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
+  const [canvasBox, setCanvasBox] = useState<CanvasBox | null>(null)
 
   const ctx = () => canvasRef.current?.getContext("2d") ?? null
   const clearCanvas = () => ctx()?.clearRect(0, 0, W, H)
+
+  // Cambio de diapositiva: el servidor limpia los trazos y acá reiniciamos el dibujo local.
+  // Va antes del efecto que pinta para que, cuando llegue el primer estado (url + trazos
+  // juntos), el repintado gane y los trazos iniciales no se borren.
+  useEffect(() => {
+    drawing.current = false
+    current.current = null
+    setBroken(false)
+    setImageSize({ width: 0, height: 0 })
+    setCanvasBox(null)
+  }, [url])
 
   // Todos pintan los trazos que llegan del Hub, también quien tiene controles: el anfitrión y
   // el presentador de turno deben verse entre sí. Si hay un trazo local en curso se dibuja
@@ -65,15 +84,35 @@ export function SlideStage({
     clearCanvas()
     annotations.forEach((stroke) => drawStroke(c, stroke))
     if (current.current) drawStroke(c, current.current)
-  }, [annotations])
+  }, [annotations, url])
 
-  // Cambio de diapositiva: el servidor limpia los trazos y acá limpiamos el dibujo local.
+  // El canvas tiene que cubrir exactamente la imagen (object-contain), no todo el stage:
+  // en vertical el contenedor es más alto que la diapositiva y los trazos quedarían
+  // desfasados. El tamaño interno sigue siendo 1280x720; solo cambia el tamaño en pantalla.
   useEffect(() => {
-    drawing.current = false
-    current.current = null
-    clearCanvas()
-    setBroken(false)
-  }, [url])
+    const stage = stageRef.current
+    if (!stage) return
+    const naturalWidth = imageSize.width || W
+    const naturalHeight = imageSize.height || H
+    const fit = () => {
+      const width = stage.clientWidth
+      const height = stage.clientHeight
+      if (!width || !height) return
+      const scale = Math.min(width / naturalWidth, height / naturalHeight)
+      const boxWidth = naturalWidth * scale
+      const boxHeight = naturalHeight * scale
+      setCanvasBox({
+        left: (width - boxWidth) / 2,
+        top: (height - boxHeight) / 2,
+        width: boxWidth,
+        height: boxHeight,
+      })
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(stage)
+    return () => observer.disconnect()
+  }, [url, imageSize.width, imageSize.height])
 
   // Pre-carga de la siguiente diapositiva: las imágenes son cacheables (immutable), así que el
   // fetch posterior sale del caché y el cambio es instantáneo.
@@ -131,8 +170,15 @@ export function SlideStage({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="relative aspect-video overflow-hidden rounded-lg border border-border bg-surface">
+    <div className="flex h-full min-h-0 flex-col gap-3 sm:gap-4">
+      <div
+        ref={stageRef}
+        className={`relative w-full overflow-hidden rounded-lg border border-border bg-surface ${
+          fill
+            ? "min-h-0 flex-1"
+            : "aspect-video max-sm:aspect-auto max-sm:min-h-0 max-sm:flex-1"
+        }`}
+      >
         {url ? (
           broken ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
@@ -145,6 +191,10 @@ export function SlideStage({
               src={url}
               alt={`Diapositiva ${slide} de ${total}`}
               className="h-full w-full object-contain"
+              onLoad={(event) => {
+                const image = event.currentTarget
+                setImageSize({ width: image.naturalWidth, height: image.naturalHeight })
+              }}
               onError={() => setBroken(true)}
             />
           )
@@ -152,30 +202,34 @@ export function SlideStage({
           <div className="flex h-full items-center justify-center text-ink/60">Cargando diapositiva…</div>
         )}
         <canvas ref={canvasRef} width={W} height={H}
-          className={`absolute inset-0 h-full w-full touch-none ${canControl ? "cursor-crosshair" : "pointer-events-none"}`}
+          style={canvasBox ?? { visibility: "hidden" }}
+          className={`absolute touch-none ${canControl ? "cursor-crosshair" : "pointer-events-none"}`}
           onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
-        {canControl && (
-          <>
-            <button aria-label="Diapositiva anterior" disabled={slide <= 1} onClick={() => { clear(); onPrev() }}
-              className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-brand-700 text-white hover:bg-brand-900 disabled:opacity-40">
-              <Icon name="arrowLeft" />
-            </button>
-            <button aria-label="Diapositiva siguiente" disabled={slide >= total} onClick={() => { clear(); onNext() }}
-              className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-brand-700 text-white hover:bg-brand-900 disabled:opacity-40">
-              <Icon name="arrowRight" />
-            </button>
-          </>
-        )}
       </div>
       {canControl && (
-        <div className="mx-auto flex flex-wrap items-center justify-center gap-1 rounded-lg border border-border bg-surface p-2">
+        <div className="flex shrink-0 items-center justify-center gap-4">
+          <button aria-label="Diapositiva anterior" disabled={slide <= 1} onClick={() => { clear(); onPrev() }}
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-700 text-white hover:bg-brand-900 disabled:opacity-40 sm:h-10 sm:w-10">
+            <Icon name="arrowLeft" />
+          </button>
+          <span className={`min-w-16 text-center text-sm font-semibold ${fill ? "text-white/70" : "text-ink/60 sm:hidden"}`}>
+            {slide} / {total}
+          </span>
+          <button aria-label="Diapositiva siguiente" disabled={slide >= total} onClick={() => { clear(); onNext() }}
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-700 text-white hover:bg-brand-900 disabled:opacity-40 sm:h-10 sm:w-10">
+            <Icon name="arrowRight" />
+          </button>
+        </div>
+      )}
+      {canControl && (
+        <div className="flex w-full shrink-0 flex-wrap items-center justify-center gap-1 rounded-lg border border-border bg-surface p-2 sm:mx-auto sm:w-auto">
           <button aria-label="Pincel" aria-pressed={!eraser} className={`${tool} ${!eraser ? "bg-brand-50" : ""}`} onClick={() => setEraser(false)}><Icon name="brush" /></button>
           <button aria-label="Borrador" aria-pressed={eraser} className={`${tool} ${eraser ? "bg-brand-50" : ""}`} onClick={() => setEraser(true)}><Icon name="eraser" /></button>
           <span className="mx-1 h-6 w-px bg-border" />
           {COLORS.map((item) => (
             <button key={item.value} aria-label={`Color ${item.name}`} aria-pressed={color === item.value}
               onClick={() => { setColor(item.value); setEraser(false) }}
-              className={`flex h-9 w-9 items-center justify-center rounded-md hover:bg-brand-50 ${color === item.value && !eraser ? "bg-brand-50" : ""}`}>
+              className={`flex h-10 w-10 items-center justify-center rounded-md hover:bg-brand-50 sm:h-9 sm:w-9 ${color === item.value && !eraser ? "bg-brand-50" : ""}`}>
               <span className="h-5 w-5 rounded-full border border-border" style={{ background: item.value }} />
             </button>
           ))}

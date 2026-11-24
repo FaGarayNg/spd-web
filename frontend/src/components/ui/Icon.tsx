@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 
 export type IconName =
   | "arrowLeft" | "arrowRight" | "brush" | "check" | "copy" | "dice" | "edit"
-  | "eraser" | "expand" | "eye" | "file" | "link" | "list" | "lock" | "logout" | "people"
+  | "eraser" | "expand" | "eye" | "file" | "link" | "list" | "lock" | "logout" | "minimize" | "people"
   | "play" | "reset" | "sparkles" | "trash" | "upload"
 
 const paths: Record<IconName, ReactNode> = {
@@ -25,6 +25,7 @@ const paths: Record<IconName, ReactNode> = {
   edit: <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />,
   eraser: <path d="m7 20-4-4 10-12a2.8 2.8 0 0 1 4 0l3 3a2.8 2.8 0 0 1 0 4l-8 9H7Zm2-12 7 7M11 20h10" />,
   expand: <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />,
+  minimize: <path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5" />,
   eye: (
     <>
       <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />

@@ -393,7 +393,7 @@ export default function RoomPage() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6 sm:gap-8">
       <RoomHeader roomId={room.id} title={room.name} accessKey={getRoomKey(room.id)} members={members.length} />
 
       {notice && (
@@ -421,7 +421,7 @@ export default function RoomPage() {
         <>
           {isHost && !configured && (
             <section className="flex flex-col gap-4">
-              <div className="flex gap-6 border-b border-border" role="tablist">
+              <div className="flex gap-6 overflow-x-auto border-b border-border" role="tablist">
                 {(["individual", "group"] as const).map((item) => (
                   <button key={item} role="tab" aria-selected={format === item} onClick={() => setFormat(item)}
                     className={`-mb-px border-b-2 px-1 pb-3 text-sm font-semibold ${
@@ -434,12 +434,12 @@ export default function RoomPage() {
               {format === "group" ? (
                 <SetupGroups onConfirm={confirmGroups} busy={settingUp} />
               ) : (
-                <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-6">
-                  <h2 className="text-lg font-semibold text-brand-700">Formato individual</h2>
+                <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 sm:p-6">
+                  <h2 className="text-base font-semibold text-brand-700 sm:text-lg">Formato individual</h2>
                   <p className="text-ink/70">
                     Cada participante carga su archivo y presenta. {members.length} {members.length === 1 ? "persona" : "personas"} en la sala.
                   </p>
-                  <Button icon="check" className="self-start" onClick={confirmIndividual}>Activar formato individual</Button>
+                  <Button icon="check" className="w-full sm:w-auto sm:self-start" onClick={confirmIndividual}>Activar formato individual</Button>
                 </div>
               )}
             </section>
@@ -447,8 +447,8 @@ export default function RoomPage() {
 
           {showList && (
             <section className="flex flex-col gap-5">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-brand-700">
+              <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+                <h2 className="text-base font-semibold text-brand-700 sm:text-lg">
                   {format === "group" ? `${groups.length} grupos: elegí tu equipo` : `Personas en la sala (${members.length})`}
                 </h2>
                 <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-700">{inRoom} en sala</span>
@@ -481,7 +481,7 @@ export default function RoomPage() {
                   onChanged={loadIndividualPresentations}
                 />
               )}
-              {isHost && !preparing && <Button icon="sparkles" className="self-start" onClick={() => setPreparing(true)}>Preparar sala</Button>}
+              {isHost && !preparing && <Button icon="sparkles" className="w-full sm:w-auto sm:self-start" onClick={() => setPreparing(true)}>Preparar sala</Button>}
               {isHost && preparing && (
                 <PrepareRoom
                   items={
@@ -552,7 +552,7 @@ export default function RoomPage() {
               Disponible incluso antes de empezar. Borra los grupos, las presentaciones asignadas y los miembros; no se puede deshacer.
             </p>
           </div>
-          <Button variant="danger" icon="trash" className="self-start" onClick={closeRoom} disabled={closing}>
+          <Button variant="danger" icon="trash" className="w-full sm:w-auto sm:self-start" onClick={closeRoom} disabled={closing}>
             {closing ? "Cerrando…" : "Cerrar sala"}
           </Button>
         </section>

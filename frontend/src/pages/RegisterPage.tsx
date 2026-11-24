@@ -1,16 +1,20 @@
 import { useState, type FormEvent } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { SplitCard } from "../components/layout/SplitCard"
 import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
 import { createUser, login } from "../services/rooms"
-import { safeReturnPath } from "../utils/redirect"
+import { loginPath, safeReturnPath } from "../utils/redirect"
 
 export default function RegisterPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const returnTo = safeReturnPath((location.state as { from?: unknown } | null)?.from)
+  const [params] = useSearchParams()
+  // Mismo criterio que el login: state o ?next=, validado antes de navegar.
+  const from = (location.state as { from?: unknown } | null)?.from ?? params.get("next")
+  const returnTo = safeReturnPath(from)
+  const loginFrom = typeof from === "string" ? safeReturnPath(from, "") : ""
   const { signIn } = useSession()
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -31,7 +35,7 @@ export default function RegisterPage() {
       .then(() => login(email, password))
       .then((result) => {
         signIn({ name: result.user.full_name, userId: result.user.id, token: result.token })
-        navigate(returnTo)
+        navigate(returnTo, { replace: true })
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "No se pudo crear la cuenta.")
@@ -43,7 +47,10 @@ export default function RegisterPage() {
     <SplitCard
       title="Creá tu cuenta"
       text="Registrate para crear salas y presentar a tu clase en vivo."
-      back={{ to: "/login", label: "Volver al inicio de sesión" }}
+      back={{
+        to: loginFrom ? loginPath(loginFrom) : "/login",
+        label: "Volver al inicio de sesión",
+      }}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold text-brand-700">Registrate</h2>
@@ -59,7 +66,13 @@ export default function RegisterPage() {
         <Button type="submit" disabled={submitting}>{submitting ? "Creando cuenta…" : "Crear cuenta"}</Button>
         <p className="text-sm text-ink/70">
           ¿Ya tenés cuenta?{" "}
-          <Link to="/login" className="font-semibold text-brand-500 hover:underline">Iniciá sesión</Link>
+          <Link
+            to={loginFrom ? loginPath(loginFrom) : "/login"}
+            state={loginFrom ? { from: loginFrom } : undefined}
+            className="font-semibold text-brand-500 hover:underline"
+          >
+            Iniciá sesión
+          </Link>
         </p>
       </form>
     </SplitCard>

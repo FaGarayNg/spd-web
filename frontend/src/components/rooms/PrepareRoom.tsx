@@ -78,7 +78,7 @@ export function PrepareRoom({ items, onStart }: Props) {
   ]
 
   return (
-    <div className="flex flex-col gap-5 rounded-lg border border-border bg-surface p-6">
+    <div className="flex flex-col gap-5 rounded-lg border border-border bg-surface p-4 sm:p-6">
       <h2 className="text-lg font-semibold text-brand-700">Orden de presentación</h2>
       <div className="grid gap-3 sm:grid-cols-2">
         {options.map((option) => (

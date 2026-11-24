@@ -67,7 +67,7 @@ export function GroupCard({
   }
 
   return (
-    <article className={`flex flex-col gap-4 rounded-lg border bg-surface p-5 ${joined ? "border-brand-700" : "border-border"}`}>
+    <article className={`flex flex-col gap-4 rounded-lg border bg-surface p-4 sm:p-5 ${joined ? "border-brand-700" : "border-border"}`}>
       <div className="flex items-baseline justify-between">
         <strong className="text-brand-700">Grupo {String(group.priority).padStart(2, "0")}</strong>
         <small className="text-ink/60">{group.members.length}/{group.limit}</small>

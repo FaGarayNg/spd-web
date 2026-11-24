@@ -38,7 +38,7 @@ export function SlideGallery({ presentationId, label, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-lg bg-surface p-6"
+        className="max-h-[90dvh] w-full max-w-4xl overflow-auto rounded-lg bg-surface p-4 sm:p-6"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between gap-3">

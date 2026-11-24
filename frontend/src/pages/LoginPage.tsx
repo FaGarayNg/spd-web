@@ -1,16 +1,22 @@
 import { useState, type FormEvent } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 import { SplitCard } from "../components/layout/SplitCard"
 import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
 import { login } from "../services/rooms"
-import { safeReturnPath } from "../utils/redirect"
+import { registerPath, safeReturnPath } from "../utils/redirect"
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const returnTo = safeReturnPath((location.state as { from?: unknown } | null)?.from)
+  const [params] = useSearchParams()
+  // El destino puede venir en el state de la navegación o en ?next= (más resistente a
+  // recargas). Cualquiera de los dos pasa por safeReturnPath.
+  const from = (location.state as { from?: unknown } | null)?.from ?? params.get("next")
+  const returnTo = safeReturnPath(from)
+  // Solo propagamos el destino al registro si era una ruta interna válida.
+  const registerFrom = typeof from === "string" ? safeReturnPath(from, "") : ""
   const { signIn } = useSession()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -26,7 +32,7 @@ export default function LoginPage() {
     login(email, password)
       .then((result) => {
         signIn({ name: result.user.full_name, userId: result.user.id, token: result.token })
-        navigate(returnTo)
+        navigate(returnTo, { replace: true })
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.")
@@ -51,7 +57,13 @@ export default function LoginPage() {
         <Button type="submit" disabled={submitting}>{submitting ? "Ingresando…" : "Iniciar sesión"}</Button>
         <p className="text-sm text-ink/70">
           ¿No tenés cuenta?{" "}
-          <Link to="/registro" className="font-semibold text-brand-500 hover:underline">Registrate</Link>
+          <Link
+            to={registerFrom ? registerPath(registerFrom) : "/registro"}
+            state={registerFrom ? { from: registerFrom } : undefined}
+            className="font-semibold text-brand-500 hover:underline"
+          >
+            Registrate
+          </Link>
         </p>
       </form>
     </SplitCard>

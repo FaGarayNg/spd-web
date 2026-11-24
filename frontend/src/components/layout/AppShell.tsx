@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Link, Outlet, useNavigate } from "react-router-dom"
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom"
 import { useSession } from "../../context/SessionContext"
 import { initials } from "../../utils/initials"
 import { Brand } from "../ui/Brand"
@@ -8,8 +8,12 @@ import { Icon } from "../ui/Icon"
 export default function AppShell() {
   const { session, signOut } = useSession()
   const navigate = useNavigate()
+  const location = useLocation()
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  // El visor en vivo ocupa toda la pantalla en el celular: sin el ancho máximo ni el
+  // padding del resto de las páginas.
+  const isLive = /^\/salas\/[^/]+\/en-vivo\/?$/.test(location.pathname)
 
   // El menú se cierra al tocar afuera o con Escape.
   useEffect(() => {
@@ -36,8 +40,8 @@ export default function AppShell() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+      <header className={`border-b border-border bg-surface ${isLive ? "hidden sm:block" : ""}`}>
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
           <Link to="/salas" aria-label="Ir a mis salas">
             <Brand />
           </Link>
@@ -47,12 +51,12 @@ export default function AppShell() {
                 onClick={() => setOpen((value) => !value)}
                 aria-haspopup="menu"
                 aria-expanded={open}
-                className="flex items-center gap-2.5 rounded-full border border-border py-1 pl-1 pr-4 text-sm font-medium hover:bg-brand-50"
+                className="flex min-w-0 items-center gap-2.5 rounded-full border border-border py-1 pl-1 pr-3 text-sm font-medium hover:bg-brand-50 sm:pr-4"
               >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-700 text-xs font-semibold text-white">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-700 text-xs font-semibold text-white">
                   {initials(session.name || "Usuario")}
                 </span>
-                {session.name || "Usuario"}
+                <span className="max-w-[38vw] truncate sm:max-w-none">{session.name || "Usuario"}</span>
               </button>
               {open && (
                 <div role="menu" className="absolute right-0 top-full z-10 mt-2 w-48 rounded-lg border border-border bg-surface p-1">
@@ -69,7 +73,7 @@ export default function AppShell() {
           )}
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-6 py-10">
+      <main className={isLive ? "w-full p-0 sm:px-6 sm:py-6" : "mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-10"}>
         <Outlet />
       </main>
     </div>

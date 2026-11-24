@@ -9,3 +9,13 @@ export function safeReturnPath(from: unknown, fallback = "/salas"): string {
     ? from
     : fallback
 }
+
+// El destino también viaja en ?next=: así sobrevive a una recarga del login o a abrir el
+// registro en otra pestaña. safeReturnPath sigue siendo el único que decide si es válido.
+export function loginPath(from: string): string {
+  return `/login?next=${encodeURIComponent(from)}`
+}
+
+export function registerPath(from: string): string {
+  return `/registro?next=${encodeURIComponent(from)}`
+}
