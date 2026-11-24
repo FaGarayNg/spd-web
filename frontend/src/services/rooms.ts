@@ -11,12 +11,15 @@ import type {
   ApiRoomMember,
   ApiPresentation,
   ApiUser,
+  ApiUserPresentation,
   Group,
   LiveSession,
   Member,
   Room,
+  UserPresentation,
 } from "../types"
 import { apiGet, apiSend, apiSendWithStatus, ApiError } from "./http"
+import { resetPresentation } from "./live"
 
 // Dominio "salas" del gateway: usuarios, salas y sus miembros, grupos y sus integrantes, y las
 // presentaciones asignadas a cada grupo. Los errores llegan como ApiError (ver http.ts), con el
@@ -67,6 +70,13 @@ export function updateRoom(
   if (changes.accessKey !== undefined) body.access_key = changes.accessKey
   if (changes.format !== undefined) body.format = changes.format
   return apiSend<ApiRoom>(`/rooms/${roomId}`, "PATCH", body).then(toRoom)
+}
+
+/** Cierra (borra) una sala. Solo el anfitrión: el back devuelve 401 sin sesión o 403 si no es
+ * el dueño. En cascada se borran grupos, presentaciones asignadas, integrantes y miembros.
+ * DELETE /api/rooms/:id */
+export function deleteRoom(roomId: number | string): Promise<void> {
+  return apiSend<void>(`/rooms/${roomId}`, "DELETE")
 }
 
 /** Crea una sala: sin clave de ingreso si accessKey queda vacía. POST /api/rooms */
@@ -161,11 +171,59 @@ export function unassignGroupPresentation(groupId: number, presentationId: strin
   return apiSend<void>(`/groups/${groupId}/presentations/${presentationId}`, "DELETE")
 }
 
+// ─── Presentaciones individuales ──────────────────────────────────────────────────────────────
+
+const toUserPresentation = (api: ApiUserPresentation): UserPresentation => ({
+  presentationId: api.presentation_id,
+  roomId: api.room_id,
+  userId: api.user_id,
+  slides: api.slides,
+  createdAt: api.created_at,
+  updatedAt: api.updated_at,
+})
+
+/** Todas las presentaciones propias de la sala. GET /api/rooms/:id/user-presentations */
+export async function getUserPresentations(roomId: number | string): Promise<UserPresentation[]> {
+  const list = await apiGet<ApiUserPresentation[]>(`/rooms/${roomId}/user-presentations`)
+  return list.map(toUserPresentation)
+}
+
+/** La presentación propia del usuario de la sesión, o null si no tiene. */
+export async function getMyPresentation(roomId: number | string): Promise<UserPresentation | null> {
+  try {
+    return toUserPresentation(await apiGet<ApiUserPresentation>(`/rooms/${roomId}/my-presentation`))
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+/** Asigna (o reemplaza) la presentación propia. POST /api/rooms/:id/my-presentation */
+export function setMyPresentation(roomId: number | string, presentationId: string): Promise<UserPresentation> {
+  return apiSend<ApiUserPresentation>(`/rooms/${roomId}/my-presentation`, "POST", {
+    presentation_id: presentationId,
+  }).then(toUserPresentation)
+}
+
+/** Quita la presentación propia. DELETE /api/rooms/:id/my-presentation */
+export function clearMyPresentation(roomId: number | string): Promise<void> {
+  return apiSend<void>(`/rooms/${roomId}/my-presentation`, "DELETE")
+}
+
+/** Publica la presentación propia del usuario en la sesión en vivo de la sala. */
+export function publishMyPresentation(roomId: number | string): Promise<LiveSession> {
+  return apiSend<ApiLiveSession>(`/rooms/${roomId}/my-presentation/live`, "PUT")
+    .then(async (api) => {
+      await resetPresentation(api.presentation_id).catch(() => undefined)
+      return { presentationId: api.presentation_id, startedAt: api.started_at }
+    })
+}
+
 // ─── Sesión en vivo ──────────────────────────────────────────────────────────────────────────
 
 // La sesión en vivo es el puntero que publica el anfitrión: qué presentación se proyecta ahora.
-// El backend solo guarda hashes de la clave, así que estos endpoints no exigen rol: el rol lo
-// maneja la interfaz (igual que en el resto de la sala).
+// GET es público (404 si no hay sesión); PUT y DELETE exigen ser el dueño de la sala: el backend
+// verifica el JWT y responde 401 sin sesión o 403 si no sos el anfitrión.
 
 /** La sesión en vivo de la sala, o null si no hay ninguna (404 del back).
  * GET /api/rooms/:id/live-session */
@@ -184,7 +242,11 @@ export async function getLiveSession(roomId: number | string): Promise<LiveSessi
  * desconocida, 503 servicio presentations caído. */
 export function setLiveSession(roomId: number | string, presentationId: string): Promise<LiveSession> {
   return apiSend<ApiLiveSession>(`/rooms/${roomId}/live-session`, "PUT", { presentation_id: presentationId })
-    .then((api) => ({ presentationId: api.presentation_id, startedAt: api.started_at }))
+    .then(async (api) => {
+      // Cada emisión arranca limpia, incluso si se repite la misma presentación.
+      await resetPresentation(api.presentation_id).catch(() => undefined)
+      return { presentationId: api.presentation_id, startedAt: api.started_at }
+    })
 }
 
 /** Da por terminada la sesión en vivo (idempotente: sin sesión también es éxito).
@@ -214,23 +276,6 @@ export function createUser(input: {
     password: input.password,
     ...(input.roles ? { roles: input.roles } : {}),
   })
-}
-
-/** Crea una cuenta real para un invitado: el backend no tiene login ni "invitados", así que la
- * identidad es un usuario común con email y contraseña autogenerados (nunca salen del
- * navegador). Devuelve el usuario para obtener su id y unirse a la sala/grupo. */
-export function createGuestUser(fullName: string): Promise<ApiUser> {
-  // UUID: sin colisiones ni datos personales en el email. Dominio reservado, no existe.
-  const email = `guest-${crypto.randomUUID()}@invitados.spd.local`
-  const password = randomSecret()
-  return createUser({ fullName, email, password })
-}
-
-// Secreto de 16+ caracteres: suficiente para la validación del back (mínimo 8) y desechable.
-function randomSecret(): string {
-  const bytes = new Uint8Array(16)
-  crypto.getRandomValues(bytes)
-  return btoa(String.fromCharCode(...bytes)) // base64: ~22 chars imprimibles
 }
 
 /** Un usuario. GET /api/users/:id */

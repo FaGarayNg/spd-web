@@ -50,9 +50,9 @@ export default function AppShell() {
                 className="flex items-center gap-2.5 rounded-full border border-border py-1 pl-1 pr-4 text-sm font-medium hover:bg-brand-50"
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-700 text-xs font-semibold text-white">
-                  {initials(session.name || "Invitado")}
+                  {initials(session.name || "Usuario")}
                 </span>
-                {session.name || "Invitado"}
+                {session.name || "Usuario"}
               </button>
               {open && (
                 <div role="menu" className="absolute right-0 top-full z-10 mt-2 w-48 rounded-lg border border-border bg-surface p-1">

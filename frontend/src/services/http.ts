@@ -51,7 +51,7 @@ async function requestRaw<T>(path: string, options: Options = {}): Promise<Resul
   const { method = "GET", body, bodyRaw, headers } = options
 
   // Si hay sesión iniciada, el token viaja en cada petición: es lo único que el backend mira
-  // para saber quién pide (los invitados sin cuenta siguen anónimos).
+  // para saber quién pide. Sin token la petición es anónima (solo consultas públicas).
   const token = getToken()
   const withAuth = token !== null ? { Authorization: `Bearer ${token}`, ...headers } : headers
 

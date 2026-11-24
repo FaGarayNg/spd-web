@@ -124,6 +124,26 @@ type presentation struct {
 
 func (presentation) TableName() string { return "presentations" }
 
+// userPresentation es la presentación propia de un participante (formato individual). Un usuario
+// tiene a lo sumo una activa por sala: la clave natural (room_id, user_id) se reactiva al volver a
+// asignar, igual que las pertenencias y las presentaciones de grupo.
+type userPresentation struct {
+	gorm.Model
+	RoomID         uint         `gorm:"not null;index;uniqueIndex:idx_up_room_user"`
+	UserID         uint         `gorm:"not null;index;uniqueIndex:idx_up_room_user"`
+	PresentationID string       `gorm:"type:uuid;not null;index"`
+	Slides         Array[int32] `gorm:"type:integer[];not null;default:'{}'"`
+}
+
+func (userPresentation) TableName() string { return "user_presentations" }
+
+func (p userPresentation) toDomain() domain.UserPresentation {
+	return domain.UserPresentation{
+		ID: p.PresentationID, RoomID: p.RoomID, UserID: p.UserID, Slides: nonNil(p.Slides),
+		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+}
+
 // liveSession es la sesión en vivo de una sala: qué presentación se está proyectando. Una sala
 // tiene a lo sumo una (RoomID es la clave primaria): lanzar otra reemplaza a la anterior. Son
 // filas físicas, sin DeletedAt: terminar la sesión la borra de verdad, y CreatedAt es el momento

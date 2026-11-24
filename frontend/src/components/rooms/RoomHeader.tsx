@@ -18,7 +18,7 @@ const tile = "flex items-center justify-between gap-3 rounded-lg border border-b
 export function RoomHeader({ roomId, title, accessKey, members }: Props) {
   const [copied, setCopied] = useState<Copied>(null)
   const [revealed, setRevealed] = useState(false)
-  // Enlace propio de esta sala: lleva el número, así quien entra solo pone su nombre y la clave.
+  // Enlace propio de esta sala: lleva el número, así quien entra inicia sesión y pone la clave.
   const invitationLink = `${window.location.origin}/unirse?sala=${roomId}`
 
   const copy = async (value: string, which: Exclude<Copied, null>) => {

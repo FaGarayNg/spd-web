@@ -512,3 +512,51 @@ func TestDeleteRoomCascades(t *testing.T) {
 	expect(t, "unirse a sala borrada", err, domain.ErrRoomNotFound)
 	mustAdd(t, svc, kept.ID, domain.NewPresentation{PresentationID: pres5})
 }
+
+func TestUserPresentations(t *testing.T) {
+	svc := newService(t, catalogOK)
+	// Dueño distinto de los participantes: el anfitrión no es un presentador en este formato.
+	const hostID = uint(999)
+	r, err := svc.CreateRoom(ctx, hostID, domain.NewRoom{Name: "Individual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ana := mustUser(t, svc, "ana@individual.test")
+	if _, created, err := svc.JoinRoom(ctx, r.ID, domain.Join{UserID: ana.ID}); err != nil || !created {
+		t.Fatalf("unirse: created = %v, err = %v", created, err)
+	}
+
+	p, err := svc.SetUserPresentation(ctx, ana.ID, r.ID, domain.NewPresentation{
+		PresentationID: pres3, Slides: &[]int32{1, 2},
+	})
+	if err != nil || p.UserID != ana.ID || p.ID != pres3 || !slices.Equal(p.Slides, []int32{1, 2}) {
+		t.Fatalf("presentación propia = %+v, err = %v", p, err)
+	}
+
+	list, err := svc.RoomUserPresentations(ctx, r.ID)
+	if err != nil || len(list) != 1 || list[0].UserID != ana.ID {
+		t.Fatalf("listado = %+v, err = %v", list, err)
+	}
+
+	// El participante dueño puede lanzar la suya, aunque no sea el anfitrión.
+	ls, err := svc.PublishMyPresentation(ctx, ana.ID, r.ID)
+	if err != nil || ls.PresentationID != pres3 {
+		t.Fatalf("publicar propia = %+v, err = %v", ls, err)
+	}
+
+	if err := svc.RemoveUserPresentation(ctx, ana.ID, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.UserPresentation(ctx, ana.ID, r.ID)
+	expect(t, "sin presentación propia", err, domain.ErrUserPresentationNotFound)
+
+	otro := mustUser(t, svc, "otro@individual.test")
+	_, err = svc.SetUserPresentation(ctx, otro.ID, r.ID, domain.NewPresentation{PresentationID: pres5})
+	expect(t, "no miembro", err, domain.ErrForbidden)
+	_, err = svc.SetUserPresentation(ctx, 0, r.ID, domain.NewPresentation{PresentationID: pres5})
+	expect(t, "anónimo", err, domain.ErrUnauthenticated)
+	_, err = svc.SetUserPresentation(ctx, hostID, r.ID, domain.NewPresentation{PresentationID: pres5})
+	expect(t, "anfitrión no participa", err, domain.ErrHostCannotPresent)
+	_, err = svc.PublishMyPresentation(ctx, hostID, r.ID)
+	expect(t, "anfitrión no publica", err, domain.ErrHostCannotPresent)
+}

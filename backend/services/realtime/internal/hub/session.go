@@ -25,11 +25,12 @@ type Command struct {
 // SlideState es el estado de una presentación en vivo: lo reciben los visores por WebSocket y
 // lo devuelve el endpoint de control.
 type SlideState struct {
-	Type           string `json:"type"` // siempre "slide"
-	PresentationID string `json:"presentation_id"`
-	Slide          int    `json:"slide"` // diapositiva actual, empezando en 1 (001.png)
-	SlideCount     int    `json:"slide_count"`
-	URL            string `json:"url"` // ruta pública de la imagen actual
+	Type           string   `json:"type"` // siempre "slide"
+	PresentationID string   `json:"presentation_id"`
+	Slide          int      `json:"slide"` // diapositiva actual, empezando en 1 (001.png)
+	SlideCount     int      `json:"slide_count"`
+	URL            string   `json:"url"` // ruta pública de la imagen actual
+	Annotations    []Stroke `json:"annotations"`
 }
 
 // SlideURL devuelve la ruta pública (a través del gateway) de la imagen de una diapositiva.
@@ -42,8 +43,9 @@ type session struct {
 	id         string
 	slide      int // diapositiva actual (empieza en 1)
 	slideCount int
-	clients    map[*Client]struct{}
-	lastActive time.Time
+	clients     map[*Client]struct{}
+	annotations []Stroke // anotaciones de la diapositiva actual; se limpian al cambiar de slide
+	lastActive  time.Time
 
 	// payload es el SlideState actual ya serializado: se calcula una vez por cambio (no una
 	// vez por visor) y todos los buzones comparten el mismo slice, que es de solo lectura.
@@ -52,23 +54,29 @@ type session struct {
 
 func newSession(id string, slideCount int, now time.Time) *session {
 	s := &session{
-		id:         id,
-		slide:      1,
-		slideCount: slideCount,
-		clients:    make(map[*Client]struct{}),
-		lastActive: now,
+		id:          id,
+		slide:       1,
+		slideCount:  slideCount,
+		clients:     make(map[*Client]struct{}),
+		annotations: []Stroke{},
+		lastActive:  now,
 	}
 	s.encode()
 	return s
 }
 
 func (s *session) state() SlideState {
+	annotations := s.annotations
+	if annotations == nil {
+		annotations = []Stroke{}
+	}
 	return SlideState{
 		Type:           "slide",
 		PresentationID: s.id,
 		Slide:          s.slide,
 		SlideCount:     s.slideCount,
 		URL:            SlideURL(s.id, s.slide),
+		Annotations:    annotations,
 	}
 }
 
@@ -101,6 +109,8 @@ func (s *session) apply(cmd Command) (bool, error) {
 		return false, nil
 	}
 	s.slide = target
+	// Cada diapositiva arranca limpia: el dibujo no se arrastra al pasar de página.
+	s.annotations = []Stroke{}
 	s.encode()
 	return true, nil
 }
@@ -111,4 +121,32 @@ func (s *session) broadcast() {
 	for c := range s.clients {
 		c.offer(s.payload)
 	}
+}
+
+// applyAnnotation actualiza los trazos y devuelve el estado serializado ya difundible. Cada
+// trazo se identifica por id: los envíos parciales reemplazan al anterior, no se acumulan.
+func (s *session) applyAnnotation(cmd AnnotationCommand) error {
+	if err := cmd.validate(); err != nil {
+		return err
+	}
+	switch cmd.Type {
+	case "clear":
+		s.annotations = []Stroke{}
+	case "annotation":
+		in := *cmd.Annotation
+		in.Points = append([]StrokePoint(nil), in.Points...)
+		for i := range s.annotations {
+			if s.annotations[i].ID == in.ID {
+				s.annotations[i] = in
+				s.encode()
+				return nil
+			}
+		}
+		if len(s.annotations) >= maxStrokes {
+			s.annotations = s.annotations[1:]
+		}
+		s.annotations = append(s.annotations, in)
+	}
+	s.encode()
+	return nil
 }

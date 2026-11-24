@@ -52,6 +52,25 @@ export type ApiGroupMember = { user_id: number; group_id: number; joined_at: str
 
 export type ApiPresentation = { presentation_id: string; group_id: number; slides: number[] }
 
+// Presentación propia de un participante (formato individual).
+export type ApiUserPresentation = {
+  presentation_id: string
+  room_id: number
+  user_id: number
+  slides: number[]
+  created_at: string
+  updated_at: string
+}
+
+export type UserPresentation = {
+  presentationId: string
+  roomId: number
+  userId: number
+  slides: number[]
+  createdAt: string
+  updatedAt: string
+}
+
 // Sesión en vivo de una sala (servicio rooms): qué presentación se está proyectando.
 export type ApiLiveSession = { room_id: number; presentation_id: string; started_at: string }
 
@@ -73,12 +92,28 @@ export type ApiPresentationDetail = {
 
 // API: servicio realtime 
 
+// Anotaciones compartidas: coordenadas en el canvas fijo de 1280x720.
+export type CanvasPoint = { x: number; y: number }
+
+export type CanvasStroke = {
+  id: string
+  color: string
+  width: number
+  eraser: boolean
+  points: CanvasPoint[]
+}
+
+export type AnnotationMessage =
+  | { type: "annotation"; annotation: CanvasStroke }
+  | { type: "clear" }
+
 export type ApiSlideState = {
   type: "slide"
   presentation_id: string
   slide: number
   slide_count: number
   url: string
+  annotations: CanvasStroke[]
 }
 
 export type Role = "host" | "guest"

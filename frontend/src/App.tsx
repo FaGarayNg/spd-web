@@ -4,7 +4,7 @@ import LoginPage from "./pages/LoginPage"
 import RoomsPage from "./pages/RoomsPage"
 import RoomPage from "./pages/RoomPage"
 import LivePage from "./pages/LivePage"
-import GuestJoinPage from "./pages/GuestJoinPage"
+import JoinRoomPage from "./pages/JoinRoomPage"
 import CreateRoomPage from "./pages/CreateRoomPage"
 import RegisterPage from "./pages/RegisterPage"
 
@@ -14,7 +14,7 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/registro" element={<RegisterPage />} />
-        <Route path="/unirse" element={<GuestJoinPage />} />
+        <Route path="/unirse" element={<JoinRoomPage />} />
         <Route path="/salas" element={<RoomsPage />} />
         <Route path="/salas/nueva" element={<CreateRoomPage />} />
         <Route path="/salas/:id" element={<RoomPage />} />

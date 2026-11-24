@@ -1,13 +1,16 @@
 import { useState, type FormEvent } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { SplitCard } from "../components/layout/SplitCard"
 import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
 import { login } from "../services/rooms"
+import { safeReturnPath } from "../utils/redirect"
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const returnTo = safeReturnPath((location.state as { from?: unknown } | null)?.from)
   const { signIn } = useSession()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -23,7 +26,7 @@ export default function LoginPage() {
     login(email, password)
       .then((result) => {
         signIn({ name: result.user.full_name, userId: result.user.id, token: result.token })
-        navigate("/salas")
+        navigate(returnTo)
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.")

@@ -62,10 +62,12 @@ type Hub struct {
 
 	// Canales SIN buffer a propósito: un envío solo se completa cuando Run lo recibe, de modo
 	// que si una goroutine hace Register y después Unregister, Run los procesa en ese orden.
-	register   chan registration
-	unregister chan *Client
-	commands   chan commandRequest
-	done       chan struct{} // se cierra cuando Run termina
+	register    chan registration
+	unregister  chan *Client
+	commands    chan commandRequest
+	annotations chan annotationRequest
+	resets      chan resetRequest
+	done        chan struct{} // se cierra cuando Run termina
 
 	// sessions es propiedad EXCLUSIVA de la goroutine Run: ningún otro código lo lee ni escribe.
 	sessions map[string]*session
@@ -90,6 +92,19 @@ type commandResult struct {
 	err   error
 }
 
+type annotationRequest struct {
+	presentationID string
+	cmd            AnnotationCommand
+	slideCount     int
+	reply          chan error
+}
+
+type resetRequest struct {
+	presentationID string
+	slideCount     int
+	reply          chan commandResult
+}
+
 // New crea un Hub. No procesa nada hasta que se llama a Run.
 func New(catalog Catalog, opts Options) *Hub {
 	log := opts.Logger
@@ -100,11 +115,13 @@ func New(catalog Catalog, opts Options) *Hub {
 		catalog:    catalog,
 		idleTTL:    opts.IdleTTL,
 		log:        log,
-		register:   make(chan registration),
-		unregister: make(chan *Client),
-		commands:   make(chan commandRequest),
-		done:       make(chan struct{}),
-		sessions:   make(map[string]*session),
+		register:    make(chan registration),
+		unregister:  make(chan *Client),
+		commands:    make(chan commandRequest),
+		annotations: make(chan annotationRequest),
+		resets:      make(chan resetRequest),
+		done:        make(chan struct{}),
+		sessions:    make(map[string]*session),
 	}
 }
 
@@ -129,6 +146,11 @@ func (h *Hub) Run(ctx context.Context) {
 			h.handleUnregister(c)
 		case req := <-h.commands:
 			state, err := h.handleCommand(req)
+			req.reply <- commandResult{state: state, err: err}
+		case req := <-h.annotations:
+			req.reply <- h.handleAnnotation(req)
+		case req := <-h.resets:
+			state, err := h.handleReset(req)
 			req.reply <- commandResult{state: state, err: err}
 		case now := <-sweep:
 			h.evictIdle(now)
@@ -187,6 +209,43 @@ func (h *Hub) Control(ctx context.Context, presentationID string, cmd Command) (
 			return err
 		}
 		res = <-req.reply // ver el comentario equivalente en Register
+		return res.err
+	})
+	return res.state, err
+}
+
+// Annotate aplica un trazo (o un borrado) a la diapositiva actual y lo difunde a todos los
+// visores de la presentación. El estado viaja completo en el payload, igual que los comandos.
+func (h *Hub) Annotate(ctx context.Context, presentationID string, cmd AnnotationCommand) error {
+	return h.withCatalog(ctx, presentationID, func(slideCount int) error {
+		req := annotationRequest{
+			presentationID: presentationID,
+			cmd:            cmd,
+			slideCount:     slideCount,
+			reply:          make(chan error, 1),
+		}
+		if err := send(ctx, h, h.annotations, req); err != nil {
+			return err
+		}
+		return <-req.reply
+	})
+}
+
+// Reset deja la sesión como nueva (diapositiva 1, sin anotaciones). El front lo llama al
+// publicar una presentación: el Hub conserva la sesión en memoria entre emisiones y, si no,
+// el dibujo de la vez anterior aparecería al volver a iniciar la misma presentación.
+func (h *Hub) Reset(ctx context.Context, presentationID string) (SlideState, error) {
+	var res commandResult
+	err := h.withCatalog(ctx, presentationID, func(slideCount int) error {
+		req := resetRequest{
+			presentationID: presentationID,
+			slideCount:     slideCount,
+			reply:          make(chan commandResult, 1),
+		}
+		if err := send(ctx, h, h.resets, req); err != nil {
+			return err
+		}
+		res = <-req.reply
 		return res.err
 	})
 	return res.state, err
@@ -285,6 +344,32 @@ func (h *Hub) handleCommand(req commandRequest) (SlideState, error) {
 	if changed {
 		s.broadcast()
 	}
+	return s.state(), nil
+}
+
+func (h *Hub) handleAnnotation(req annotationRequest) error {
+	s, err := h.sessionFor(req.presentationID, req.slideCount)
+	if err != nil {
+		return err
+	}
+	s.lastActive = time.Now()
+	if err := s.applyAnnotation(req.cmd); err != nil {
+		return err
+	}
+	s.broadcast()
+	return nil
+}
+
+func (h *Hub) handleReset(req resetRequest) (SlideState, error) {
+	s, err := h.sessionFor(req.presentationID, req.slideCount)
+	if err != nil {
+		return SlideState{}, err
+	}
+	s.lastActive = time.Now()
+	s.slide = 1
+	s.annotations = []Stroke{}
+	s.encode()
+	s.broadcast()
 	return s.state(), nil
 }
 

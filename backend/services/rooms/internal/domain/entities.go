@@ -101,3 +101,15 @@ type Presentation struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// UserPresentation es la presentación propia de un participante en una sala con formato
+// individual. ID es el UUID del servicio presentations y Slides, el subconjunto que presentará.
+// Un usuario tiene a lo sumo una presentación activa por sala.
+type UserPresentation struct {
+	ID             string    `json:"presentation_id"`
+	RoomID         uint      `json:"room_id"`
+	UserID         uint      `json:"user_id"`
+	Slides         []int32   `json:"slides"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}

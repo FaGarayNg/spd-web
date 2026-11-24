@@ -66,6 +66,9 @@ func (s *Store) DeleteUser(ctx context.Context, id uint) error {
 		if err := tx.Where("user_id = ?", id).Delete(&roomMember{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("user_id = ?", id).Delete(&userPresentation{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("user_id = ?", id).Delete(&groupMember{}).Error
 	})
 }

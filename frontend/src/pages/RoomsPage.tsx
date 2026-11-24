@@ -30,8 +30,8 @@ export default function RoomsPage() {
     let active = true
     setLoading(true)
     setError("")
-    // Con sesión real o de invitado: las salas del usuario, filtradas por el rol de la pestaña.
-    // Sin usuario (ni cuenta ni invitado): nada que mostrar todavía.
+    // Con sesión iniciada: las salas del usuario, filtradas por el rol de la pestaña.
+    // Sin sesión: nada que mostrar todavía.
     const userId = session?.userId
     const request =
       userId === undefined
@@ -107,7 +107,7 @@ export default function RoomsPage() {
       ) : rooms.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border bg-surface p-8 text-center text-ink/70">
           {role === "guest" && session?.userId === undefined
-            ? "Todavía no te uniste a ninguna sala. Registrate o entrá como invitado para sumarte."
+            ? "Todavía no te uniste a ninguna sala. Pedile al anfitrión el enlace y la clave para sumarte."
             : tab.empty}
         </p>
       ) : (

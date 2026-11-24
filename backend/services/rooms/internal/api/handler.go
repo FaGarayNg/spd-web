@@ -54,6 +54,11 @@ func (h *Handler) Register(r gin.IRouter) {
 	r.DELETE("/api/rooms/:id/members/:user_id", h.leaveRoom)
 	r.GET("/api/rooms/:id/groups", h.roomGroups)
 	r.POST("/api/rooms/:id/groups", h.createGroup)
+	r.GET("/api/rooms/:id/user-presentations", h.roomUserPresentations)
+	r.GET("/api/rooms/:id/my-presentation", h.getMyPresentation)
+	r.POST("/api/rooms/:id/my-presentation", h.setMyPresentation)
+	r.DELETE("/api/rooms/:id/my-presentation", h.removeMyPresentation)
+	r.PUT("/api/rooms/:id/my-presentation/live", h.publishMyPresentation)
 	r.GET("/api/rooms/:id/live-session", h.getLiveSession)
 	r.PUT("/api/rooms/:id/live-session", h.setLiveSession)
 	r.DELETE("/api/rooms/:id/live-session", h.clearLiveSession)
@@ -122,12 +127,13 @@ func (h *Handler) fail(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrUnauthenticated), errors.Is(err, domain.ErrWrongCredentials),
 		errors.Is(err, platform.ErrTokenInvalid):
 		platform.WriteError(c, http.StatusUnauthorized, err.Error())
-	case errors.Is(err, domain.ErrForbidden):
+	case errors.Is(err, domain.ErrForbidden), errors.Is(err, domain.ErrHostCannotPresent):
 		platform.WriteError(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, domain.ErrWrongAccessKey):
 		platform.WriteError(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, domain.ErrUserNotFound), errors.Is(err, domain.ErrRoomNotFound),
 		errors.Is(err, domain.ErrGroupNotFound), errors.Is(err, domain.ErrPresentationNotFound),
+		errors.Is(err, domain.ErrUserPresentationNotFound),
 		errors.Is(err, domain.ErrLiveSessionNotFound),
 		errors.Is(err, domain.ErrNotRoomMember), errors.Is(err, domain.ErrNotGroupMember):
 		platform.WriteError(c, http.StatusNotFound, err.Error())

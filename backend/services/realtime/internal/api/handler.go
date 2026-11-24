@@ -47,6 +47,7 @@ func New(h *hub.Hub, allowedOrigins []string, log *slog.Logger) *Handler {
 func (h *Handler) Register(r gin.IRouter) {
 	r.GET("/ws/presentation/:id", h.serveWS)
 	r.POST("/api/presentations/:id/control", h.control)
+	r.POST("/api/presentations/:id/reset", h.reset)
 }
 
 // Shutdown termina las conexiones WebSocket al apagar el servicio. El cierre ordenado (1001)
@@ -141,6 +142,23 @@ func (h *Handler) control(c *gin.Context) {
 		if status >= http.StatusInternalServerError {
 			h.log.Error("comando de control fallido", "presentation_id", id, "err", err)
 		}
+		platform.WriteError(c, status, msg)
+		return
+	}
+	c.JSON(http.StatusOK, state)
+}
+
+// reset atiende POST /api/presentations/:id/reset: vuelve a la diapositiva 1 y limpia dibujos.
+// Lo llama el front al publicar, para que una sesión nueva no herede el estado de la anterior.
+func (h *Handler) reset(c *gin.Context) {
+	id, ok := platform.CanonicalUUID(c.Param("id"))
+	if !ok {
+		platform.WriteError(c, http.StatusBadRequest, "id de presentación inválido")
+		return
+	}
+	state, err := h.hub.Reset(c.Request.Context(), id)
+	if err != nil {
+		status, msg := controlError(err)
 		platform.WriteError(c, status, msg)
 		return
 	}

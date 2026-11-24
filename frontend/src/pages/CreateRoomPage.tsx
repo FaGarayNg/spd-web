@@ -19,7 +19,7 @@ export default function CreateRoomPage() {
   const [error, setError] = useState("")
 
   // Crear una sala exige una cuenta con sesión iniciada: quien la crea queda como dueño
-  // (anfitrión) en el backend. Un token ausente es sesión anónima (invitado).
+  // (anfitrión) en el backend. Sin token no se puede asignar ese rol.
   if (session?.token === undefined) {
     return (
       <SplitCard
@@ -38,7 +38,7 @@ export default function CreateRoomPage() {
           </div>
           <p className="text-sm text-ink/70">
             ¿Te invitaron a una sala?{" "}
-            <Link to="/unirse" className="font-semibold text-brand-500 hover:underline">Entrá como invitado</Link>
+            <Link to="/unirse" className="font-semibold text-brand-500 hover:underline">Ingresá con tu cuenta</Link>
           </p>
         </div>
       </SplitCard>

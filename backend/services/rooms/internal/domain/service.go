@@ -14,6 +14,7 @@ var (
 	ErrRoomNotFound         = errors.New("sala no encontrada")
 	ErrGroupNotFound        = errors.New("grupo no encontrado")
 	ErrPresentationNotFound = errors.New("presentación no encontrada en el grupo")
+	ErrUserPresentationNotFound = errors.New("el usuario no tiene una presentación propia en la sala")
 	ErrNotRoomMember        = errors.New("el usuario no es miembro de la sala")
 	ErrNotGroupMember       = errors.New("el usuario no es integrante del grupo")
 	ErrLiveSessionNotFound  = errors.New("la sala no tiene una presentación en vivo")
@@ -34,6 +35,8 @@ var (
 	ErrGroupFull              = errors.New("el grupo está completo")
 	ErrLimitBelowMembers      = errors.New("el cupo no puede ser menor que los integrantes actuales")
 	ErrWrongAccessKey         = errors.New("clave de ingreso incorrecta")
+	// ErrHostCannotPresent: el anfitrión conforma la sala, no participa del formato individual.
+	ErrHostCannotPresent = errors.New("el anfitrión no presenta en el formato individual")
 
 	// ErrPresentationUnknown indica que el servicio presentations no tiene esa presentación.
 	ErrPresentationUnknown = errors.New("la presentación no existe en el servicio presentations")
@@ -91,6 +94,12 @@ type Store interface {
 	GetPresentation(ctx context.Context, groupID uint, id string) (Presentation, error)
 	SetSlides(ctx context.Context, groupID uint, id string, slides []int32) (Presentation, error)
 	RemovePresentation(ctx context.Context, groupID uint, id string) error
+
+	// Presentaciones propias del formato individual: un usuario, a lo sumo una por sala.
+	SetUserPresentation(ctx context.Context, p UserPresentation) (UserPresentation, error)
+	UserPresentation(ctx context.Context, roomID, userID uint) (UserPresentation, error)
+	RoomUserPresentations(ctx context.Context, roomID uint) ([]UserPresentation, error)
+	RemoveUserPresentation(ctx context.Context, roomID, userID uint) error
 
 	// SetLiveSession marca qué presentación se proyecta en la sala (reemplaza la anterior:
 	// StartedAt queda en el momento del alta). LiveSession devuelve ErrLiveSessionNotFound si

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/rand/v2"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -122,8 +123,9 @@ func TestRegisterReceivesCurrentSlide(t *testing.T) {
 	control(t, h, pid, Command{Action: ActionGoto, Slide: 3})
 	c := register(t, h, pid)
 
-	want := SlideState{Type: "slide", PresentationID: pid, Slide: 3, SlideCount: 5, URL: "/api/presentations/" + pid + "/slides/3"}
-	if got := recv(t, c); got != want {
+	want := SlideState{Type: "slide", PresentationID: pid, Slide: 3, SlideCount: 5,
+		URL: "/api/presentations/" + pid + "/slides/3", Annotations: []Stroke{}}
+	if got := recv(t, c); !reflect.DeepEqual(got, want) {
 		t.Fatalf("estado inicial = %+v, se esperaba %+v", got, want)
 	}
 }
@@ -395,4 +397,73 @@ func TestConcurrentStress(t *testing.T) {
 		t.Fatalf("solo se recibieron %d mensajes: el test no ejercitó la difusión", received.Load())
 	}
 	t.Logf("%d visores, %d comandos, %d mensajes entregados", len(ids)*viewers, len(ids)*slides, received.Load())
+}
+
+func TestAnnotationsAreSharedAndClearedOnSlideChange(t *testing.T) {
+	h := startHub(t, newFakeCatalog(map[string]int{pid: 5}), Options{})
+	a, b := register(t, h, pid), register(t, h, pid)
+	recv(t, a) // estado inicial de cada visor
+	recv(t, b)
+
+	stroke := AnnotationCommand{Type: "annotation", Annotation: &Stroke{
+		ID: "trazo-1", Color: "#ffffff", Width: 5,
+		Points: []StrokePoint{{X: 10, Y: 20}, {X: 30, Y: 40}},
+	}}
+	if err := h.Annotate(context.Background(), pid, stroke); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []*Client{a, b} {
+		st := recv(t, c)
+		if len(st.Annotations) != 1 || st.Annotations[0].ID != "trazo-1" || len(st.Annotations[0].Points) != 2 {
+			t.Fatalf("anotación recibida = %+v", st.Annotations)
+		}
+	}
+
+	// La misma id reemplaza al trazo, no lo duplica.
+	stroke.Annotation.Points = append(stroke.Annotation.Points, StrokePoint{X: 50, Y: 60})
+	if err := h.Annotate(context.Background(), pid, stroke); err != nil {
+		t.Fatal(err)
+	}
+	if st := recv(t, a); len(st.Annotations) != 1 || len(st.Annotations[0].Points) != 3 {
+		t.Fatalf("upsert = %+v", st.Annotations)
+	}
+	recv(t, b)
+
+	control(t, h, pid, Command{Action: ActionNext})
+	for _, c := range []*Client{a, b} {
+		if st := recv(t, c); len(st.Annotations) != 0 {
+			t.Fatalf("el dibujo debe limpiarse al cambiar de diapositiva: %+v", st.Annotations)
+		}
+	}
+
+	if err := h.Annotate(context.Background(), pid, AnnotationCommand{Type: "bogus"}); !errors.Is(err, ErrInvalidAnnotation) {
+		t.Fatalf("comando inválido: err = %v", err)
+	}
+}
+
+func TestResetStartsFresh(t *testing.T) {
+	h := startHub(t, newFakeCatalog(map[string]int{pid: 5}), Options{})
+	c := register(t, h, pid)
+	recv(t, c) // estado inicial
+
+	control(t, h, pid, Command{Action: ActionGoto, Slide: 3})
+	recv(t, c)
+	if err := h.Annotate(context.Background(), pid, AnnotationCommand{
+		Type: "annotation", Annotation: &Stroke{ID: "viejo", Color: "#fff", Width: 5,
+			Points: []StrokePoint{{X: 1, Y: 1}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recv(t, c)
+
+	st, err := h.Reset(context.Background(), pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Slide != 1 || len(st.Annotations) != 0 {
+		t.Fatalf("reset = slide %d, anotaciones %+v", st.Slide, st.Annotations)
+	}
+	if got := recv(t, c); got.Slide != 1 || len(got.Annotations) != 0 {
+		t.Fatalf("el visor recibió slide %d, anotaciones %+v", got.Slide, got.Annotations)
+	}
 }

@@ -31,3 +31,14 @@ export function saveRoomKey(roomId: number | string, key: string) {
 export function getRoomKey(roomId: number | string): string | undefined {
   return readAll()[String(roomId)]
 }
+
+/** Olvida la clave de una sala cerrada: no sirve guardarla para siempre en este dispositivo. */
+export function removeRoomKey(roomId: number | string) {
+  try {
+    const keys = readAll()
+    delete keys[String(roomId)]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(keys))
+  } catch {
+    // sin acceso al almacenamiento: no hay nada que limpiar
+  }
+}

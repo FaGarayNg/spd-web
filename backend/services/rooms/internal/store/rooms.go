@@ -70,6 +70,9 @@ func (s *Store) DeleteRoom(ctx context.Context, id uint) error {
 		if err := tx.Where("group_id IN (?)", groups).Delete(&groupMember{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("room_id = ?", id).Delete(&userPresentation{}).Error; err != nil {
+			return err
+		}
 		// live_sessions no tiene borrado lógico: su fila se borra de verdad con la sala.
 		if err := tx.Where("room_id = ?", id).Delete(&liveSession{}).Error; err != nil {
 			return err
@@ -119,6 +122,9 @@ func (s *Store) RemoveRoomMember(ctx context.Context, roomID, userID uint) error
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Where("room_id = ? AND user_id = ?", roomID, userID).Delete(&roomMember{})
 		if err := deleted(res, domain.ErrNotRoomMember); err != nil {
+			return err
+		}
+		if err := tx.Where("room_id = ? AND user_id = ?", roomID, userID).Delete(&userPresentation{}).Error; err != nil {
 			return err
 		}
 		groups := tx.Unscoped().Model(&group{}).Select("id").Where("room_id = ?", roomID)

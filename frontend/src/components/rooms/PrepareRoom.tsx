@@ -3,7 +3,7 @@ import { Button } from "../ui/Button"
 import { Icon, type IconName } from "../ui/Icon"
 
 type Item = { key: string; label: string; badge: string }
-type Props = { items: Item[]; onStart: () => void }
+type Props = { items: Item[]; onStart: (orderedKeys: string[]) => void }
 type OrderMode = "ordered" | "random"
 
 const ROUNDS = 6 // vueltas del sorteo
@@ -119,7 +119,7 @@ export function PrepareRoom({ items, onStart }: Props) {
             {drawing ? "Sorteando…" : "Sortear"}
           </Button>
         )}
-        <Button variant="accent" icon="play" onClick={onStart} disabled={drawing}>Iniciar presentaciones</Button>
+        <Button variant="accent" icon="play" onClick={() => onStart(order.map((item) => item.key))} disabled={drawing}>Iniciar presentaciones</Button>
       </div>
     </div>
   )

@@ -4,16 +4,13 @@ import { setToken } from "../utils/token"
 // Sesión del navegador. El backend emite un JWT en el login (POST /api/auth/login) y http.ts lo
 // manda en cada petición: eso identifica al usuario del otro lado. El userId sirve para las
 // llamadas que necesitan el id en el cuerpo (unirse a sala/grupo). Se persiste en localStorage
-// para que la sesión sobreviva recargas y pestañas nuevas (clave: que el invitado no pierda su
-// lugar).
+// para que la sesión sobreviva recargas y pestañas nuevas.
 
 export type Session = {
   name: string
-  /** Id del usuario en el backend, si el flujo que inició sesión creó/registró uno real. */
+  /** Id del usuario en el backend. */
   userId?: number
-  /** true: la identidad la creó el flujo de invitado (datos de acceso efímeros). */
-  guest?: boolean
-  /** JWT de la sesión; su ausencia (invitado) es una sesión anónima para el backend. */
+  /** JWT de la sesión. Sin él no hay sesión válida (el login siempre lo entrega). */
   token?: string
 }
 
@@ -25,6 +22,8 @@ function load(): Session | null {
     if (!raw) return null
     const parsed = JSON.parse(raw) as Session
     if (typeof parsed !== "object" || parsed === null || typeof parsed.name !== "string") return null
+    // Sesiones viejas sin token (identidades efímeras) ya no son válidas.
+    if (typeof parsed.token !== "string" || parsed.token === "") return null
     return parsed
   } catch {
     return null // localStorage bloqueado (p. ej. cookies off): sesión volátil

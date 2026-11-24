@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react"
+import type { CanvasPoint, CanvasStroke } from "../../types"
 import { Icon } from "../ui/Icon"
 
 type Props = {
@@ -7,6 +8,10 @@ type Props = {
   /** Imagen de la diapositiva actual (ruta del servicio presentations vía gateway). */
   url: string
   canControl: boolean
+  /** Trazos ya dibujados, compartidos por el servidor. */
+  annotations: CanvasStroke[]
+  onAnnotation: (stroke: CanvasStroke) => void
+  onClear: () => void
   onPrev: () => void
   onNext: () => void
 }
@@ -21,17 +26,52 @@ const W = 1280
 const H = 720
 const tool = "flex h-9 w-9 items-center justify-center rounded-md text-brand-700 hover:bg-brand-50"
 
-// Las anotaciones son locales: solo difunde este cliente la diapositiva que ve el resto.
-export function SlideStage({ slide, total, url, canControl, onPrev, onNext }: Props) {
+function drawStroke(c: CanvasRenderingContext2D, stroke: CanvasStroke) {
+  if (stroke.points.length === 0) return
+  c.save()
+  c.globalCompositeOperation = stroke.eraser ? "destination-out" : "source-over"
+  c.strokeStyle = stroke.color
+  c.lineWidth = stroke.width
+  c.lineCap = "round"
+  c.lineJoin = "round"
+  c.beginPath()
+  c.moveTo(stroke.points[0].x, stroke.points[0].y)
+  if (stroke.points.length === 1) c.lineTo(stroke.points[0].x + 0.01, stroke.points[0].y)
+  else for (const p of stroke.points.slice(1)) c.lineTo(p.x, p.y)
+  c.stroke()
+  c.restore()
+}
+
+export function SlideStage({
+  slide, total, url, canControl, annotations, onAnnotation, onClear, onPrev, onNext,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawing = useRef(false)
+  const current = useRef<CanvasStroke | null>(null)
+  const lastSent = useRef(0)
   const [eraser, setEraser] = useState(false)
   const [color, setColor] = useState(COLORS[0].value)
   const [broken, setBroken] = useState(false)
 
-  // Cambio de diapositiva: resetear el dibujo local y atajar si la imagen no carga.
+  const ctx = () => canvasRef.current?.getContext("2d") ?? null
+  const clearCanvas = () => ctx()?.clearRect(0, 0, W, H)
+
+  // Todos pintan los trazos que llegan del Hub, también quien tiene controles: el anfitrión y
+  // el presentador de turno deben verse entre sí. Si hay un trazo local en curso se dibuja
+  // encima después del repintado para que no se pierda mientras se está dibujando.
   useEffect(() => {
-    canvasRef.current?.getContext("2d")?.clearRect(0, 0, W, H)
+    const c = ctx()
+    if (!c) return
+    clearCanvas()
+    annotations.forEach((stroke) => drawStroke(c, stroke))
+    if (current.current) drawStroke(c, current.current)
+  }, [annotations])
+
+  // Cambio de diapositiva: el servidor limpia los trazos y acá limpiamos el dibujo local.
+  useEffect(() => {
+    drawing.current = false
+    current.current = null
+    clearCanvas()
     setBroken(false)
   }, [url])
 
@@ -44,9 +84,7 @@ export function SlideStage({ slide, total, url, canControl, onPrev, onNext }: Pr
     }
   }, [url, slide, total])
 
-  const ctx = () => canvasRef.current?.getContext("2d") ?? null
-  const clear = () => ctx()?.clearRect(0, 0, W, H)
-  const point = (e: PointerEvent<HTMLCanvasElement>) => {
+  const point = (e: PointerEvent<HTMLCanvasElement>): CanvasPoint => {
     const r = e.currentTarget.getBoundingClientRect()
     return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) }
   }
@@ -56,25 +94,40 @@ export function SlideStage({ slide, total, url, canControl, onPrev, onNext }: Pr
     if (!canControl || !c) return
     drawing.current = true
     e.currentTarget.setPointerCapture(e.pointerId)
-    const p = point(e)
-    c.beginPath()
-    c.moveTo(p.x, p.y)
+    const stroke: CanvasStroke = {
+      id: crypto.randomUUID(), color, width: eraser ? 28 : 5, eraser, points: [point(e)],
+    }
+    current.current = stroke
+    drawStroke(c, stroke)
+    onAnnotation(stroke)
   }
+
   const move = (e: PointerEvent<HTMLCanvasElement>) => {
+    if (!drawing.current || !current.current) return
     const c = ctx()
-    if (!drawing.current || !c) return
-    c.globalCompositeOperation = eraser ? "destination-out" : "source-over"
-    c.strokeStyle = color
-    c.lineWidth = eraser ? 28 : 5
-    c.lineCap = "round"
-    c.lineJoin = "round"
-    const p = point(e)
-    c.lineTo(p.x, p.y)
-    c.stroke()
+    if (!c) return
+    const stroke = current.current
+    stroke.points.push(point(e))
+    // Se repinta el trazo completo para que el local coincida con el estado compartido.
+    drawStroke(c, stroke)
+    const now = Date.now()
+    if (now - lastSent.current >= 50) {
+      onAnnotation({ ...stroke, points: [...stroke.points] })
+      lastSent.current = now
+    }
   }
-  const go = (change: () => void) => {
-    clear()
-    change()
+
+  const end = () => {
+    if (!drawing.current) return
+    drawing.current = false
+    const stroke = current.current
+    current.current = null
+    if (stroke) onAnnotation({ ...stroke, points: [...stroke.points] })
+  }
+
+  const clear = () => {
+    clearCanvas()
+    onClear()
   }
 
   return (
@@ -100,14 +153,14 @@ export function SlideStage({ slide, total, url, canControl, onPrev, onNext }: Pr
         )}
         <canvas ref={canvasRef} width={W} height={H}
           className={`absolute inset-0 h-full w-full touch-none ${canControl ? "cursor-crosshair" : "pointer-events-none"}`}
-          onPointerDown={start} onPointerMove={move} onPointerUp={() => (drawing.current = false)} onPointerCancel={() => (drawing.current = false)} />
+          onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
         {canControl && (
           <>
-            <button aria-label="Diapositiva anterior" disabled={slide <= 1} onClick={() => go(onPrev)}
+            <button aria-label="Diapositiva anterior" disabled={slide <= 1} onClick={() => { clear(); onPrev() }}
               className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-brand-700 text-white hover:bg-brand-900 disabled:opacity-40">
               <Icon name="arrowLeft" />
             </button>
-            <button aria-label="Diapositiva siguiente" disabled={slide >= total} onClick={() => go(onNext)}
+            <button aria-label="Diapositiva siguiente" disabled={slide >= total} onClick={() => { clear(); onNext() }}
               className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-brand-700 text-white hover:bg-brand-900 disabled:opacity-40">
               <Icon name="arrowRight" />
             </button>

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -17,7 +18,7 @@ const (
 	writeTimeout = 10 * time.Second // plazo para entregar un mensaje; un visor más lento se desconecta
 	pingInterval = 30 * time.Second // heartbeat para detectar conexiones muertas
 	pingTimeout  = 10 * time.Second // espera máxima del pong
-	readLimit    = 512              // bytes por mensaje entrante: los visores no envían datos
+	readLimit    = 16 << 10         // bytes por mensaje entrante: un trazo con puntos JSON
 
 	// StatusPresentationNotFound es un código de cierre propio (rango 4000-4999 de la RFC 6455):
 	// la presentación no existe y el visor no debe reintentar.
@@ -63,7 +64,7 @@ func (h *Handler) serveWS(c *gin.Context) {
 	defer h.hub.Unregister(client)
 
 	h.log.Debug("visor conectado", "presentation_id", id)
-	err = pump(ctx, conn, client.Messages())
+	err = pump(ctx, conn, client.Messages(), h.hub, id)
 	h.log.Debug("visor desconectado", "presentation_id", id, "motivo", err)
 }
 
@@ -77,7 +78,7 @@ func (h *Handler) serveWS(c *gin.Context) {
 //
 // Cuando cualquiera de los dos termina cancela al otro, y pump no retorna hasta que ambos han
 // terminado: no quedan goroutines huérfanas ni escrituras en curso tras el retorno.
-func pump(ctx context.Context, conn *websocket.Conn, msgs <-chan []byte) error {
+func pump(ctx context.Context, conn *websocket.Conn, msgs <-chan []byte, h *hub.Hub, presentationID string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -90,7 +91,7 @@ func pump(ctx context.Context, conn *websocket.Conn, msgs <-chan []byte) error {
 		writeDone <- err
 	}()
 
-	readErr := readLoop(ctx, conn)
+	readErr := readLoop(ctx, conn, h, presentationID)
 	cancel()                // el visor cerró o el socket falló: detener writeLoop
 	writeErr := <-writeDone // esperar a writeLoop antes de retornar
 
@@ -140,12 +141,22 @@ func ping(ctx context.Context, conn *websocket.Conn) error {
 	return conn.Ping(ctx)
 }
 
-// readLoop lee hasta que la conexión se cierra. Los visores son de solo lectura: cualquier
-// mensaje de datos se descarta (y uno mayor que readLimit cierra la conexión con 1009).
-func readLoop(ctx context.Context, conn *websocket.Conn) error {
+// readLoop lee hasta que la conexión se cierra. Los mensajes de datos son anotaciones del
+// presentador: se aplican en el Hub y se difunden al resto. Uno mayor que readLimit cierra la
+// conexión con 1009. Los frames de control (ping/pong/close) los procesa la librería acá también.
+func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, presentationID string) error {
 	for {
-		if _, _, err := conn.Read(ctx); err != nil {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
 			return err
+		}
+		var cmd hub.AnnotationCommand
+		if err := json.Unmarshal(data, &cmd); err != nil {
+			continue // mensaje no entendido: no cortamos la conexión
+		}
+		if err := h.Annotate(ctx, presentationID, cmd); err != nil {
+			// Un trazo inválido no debe desconectar al presentador ni a los visores.
+			continue
 		}
 	}
 }

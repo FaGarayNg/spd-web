@@ -1,13 +1,16 @@
 import { useState, type FormEvent } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { SplitCard } from "../components/layout/SplitCard"
 import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
 import { createUser, login } from "../services/rooms"
+import { safeReturnPath } from "../utils/redirect"
 
 export default function RegisterPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const returnTo = safeReturnPath((location.state as { from?: unknown } | null)?.from)
   const { signIn } = useSession()
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -28,7 +31,7 @@ export default function RegisterPage() {
       .then(() => login(email, password))
       .then((result) => {
         signIn({ name: result.user.full_name, userId: result.user.id, token: result.token })
-        navigate("/salas")
+        navigate(returnTo)
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "No se pudo crear la cuenta.")

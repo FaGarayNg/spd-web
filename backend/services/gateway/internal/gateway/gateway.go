@@ -34,8 +34,9 @@ func Register(r gin.IRouter, up Upstreams, log *slog.Logger) {
 	r.GET("/api/presentations/:id", presentations)
 	r.GET("/api/presentations/:id/slides/:slide_id", presentations)
 
-	// Dominio "tiempo real": control del presentador y WebSocket de los visores.
+	// Dominio "tiempo real": control del presentador, reset al iniciar y WebSocket de los visores.
 	r.POST("/api/presentations/:id/control", realtime)
+	r.POST("/api/presentations/:id/reset", realtime)
 	r.GET("/ws/presentation/:id", realtime)
 
 	// Dominio "salas": usuarios, salas y sus miembros, grupos y sus integrantes, presentaciones
@@ -61,6 +62,11 @@ func Register(r gin.IRouter, up Upstreams, log *slog.Logger) {
 	r.DELETE("/api/rooms/:id/members/:user_id", rooms)
 	r.GET("/api/rooms/:id/groups", rooms)
 	r.POST("/api/rooms/:id/groups", rooms)
+	r.GET("/api/rooms/:id/user-presentations", rooms)
+	r.GET("/api/rooms/:id/my-presentation", rooms)
+	r.POST("/api/rooms/:id/my-presentation", rooms)
+	r.DELETE("/api/rooms/:id/my-presentation", rooms)
+	r.PUT("/api/rooms/:id/my-presentation/live", rooms)
 	r.GET("/api/rooms/:id/live-session", rooms)
 	r.PUT("/api/rooms/:id/live-session", rooms)
 	r.DELETE("/api/rooms/:id/live-session", rooms)

@@ -10,7 +10,7 @@ type Props = {
   presentation?: ApiPresentation | null
   /** true mientras el padre sube y asigna el archivo de ESTE grupo. */
   uploading?: boolean
-  /** El anfitrión puede desasignar (por ahora cualquiera podría vía API; en la UI solo él). */
+  /** Desasignar es solo del anfitrión: el back exige sesión y dueño de la sala (401/403). */
   canManage?: boolean
   /** Solo el anfitrión lanza la presentación del grupo a la sesión en vivo. */
   canPresent?: boolean

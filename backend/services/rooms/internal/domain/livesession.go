@@ -19,7 +19,8 @@ type LiveSession struct {
 }
 
 // SetLiveSession publica la sesión en vivo de la sala: la presentación se proyecta desde ahora.
-// Solo el anfitrión puede lanzar. La presentación tiene que conocerla el servicio presentations
+// La lanza el anfitrión o, en formato individual, el participante dueño de esa presentación propia.
+// La presentación tiene que conocerla el servicio presentations
 // (si no, no hay nada que proyectar). Lanzar otra presentación reemplaza a la anterior.
 func (s *Service) SetLiveSession(ctx context.Context, callerID, roomID uint, presentationID string) (LiveSession, error) {
 	r, err := s.store.GetRoom(ctx, roomID)
@@ -27,7 +28,14 @@ func (s *Service) SetLiveSession(ctx context.Context, callerID, roomID uint, pre
 		return LiveSession{}, err
 	}
 	if err := checkOwner(r, callerID); err != nil {
-		return LiveSession{}, err
+		// En formato individual el participante también puede lanzar LA SUYA: basta que tenga
+		// una presentación propia activa en esta sala. Seguir sin sesión sigue siendo 401.
+		if !errors.Is(err, ErrForbidden) {
+			return LiveSession{}, err
+		}
+		if _, ownErr := s.store.UserPresentation(ctx, roomID, callerID); ownErr != nil {
+			return LiveSession{}, err
+		}
 	}
 	if _, err := s.catalog.SlideCount(ctx, presentationID); err != nil {
 		if errors.Is(err, ErrPresentationUnknown) {

@@ -1,4 +1,4 @@
-import type { ApiPresentationDetail, ApiSlideState } from "../types"
+import type { AnnotationMessage, ApiPresentationDetail, ApiSlideState } from "../types"
 import { apiGet, apiSend, apiUpload } from "./http"
 
 // Dominios "presentaciones" y "tiempo real" del gateway: la subida y metadatos de una
@@ -39,15 +39,28 @@ export function controlPresentation(presentationId: string, command: ControlComm
   return apiSend<ApiSlideState>(`/presentations/${presentationId}/control`, "POST", body)
 }
 
+/** Vuelve a la diapositiva 1 y limpia las anotaciones. Se llama al publicar, para que una sesión
+ * nueva no herede el dibujo de la anterior (el Hub conserva la sesión en memoria). */
+export function resetPresentation(presentationId: string): Promise<ApiSlideState> {
+  return apiSend<ApiSlideState>(`/presentations/${presentationId}/reset`, "POST")
+}
+
+export type LiveSocket = {
+  /** Cierre normal (1000) de parte del cliente. */
+  disconnect: () => void
+  /** Envía anotaciones al servidor para que las difunda a todos los visores. */
+  send: (message: AnnotationMessage) => void
+}
+
 /**
- * Se conecta al WebSocket de una sesión en vivo y devuelve la función de desconexión. Cada
- * mensaje del servidor es un estado (ApiSlideState): el bucle lo entrega a onState.
+ * Se conecta al WebSocket de una sesión en vivo. Cada mensaje del servidor es un estado
+ * (ApiSlideState) con la diapositiva y los trazos actuales; `send` manda los trazos del que presenta.
  */
 export function connectPresentationSocket(
   presentationId: string,
   onState: (state: ApiSlideState) => void,
   onError?: (error: Event | CloseEvent) => void,
-): () => void {
+): LiveSocket {
   // Mismo origen: en desarrollo el proxy de Vite reenvía /ws al gateway.
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
   const socket = new WebSocket(`${protocol}//${window.location.host}/ws/presentation/${presentationId}`)
@@ -64,8 +77,13 @@ export function connectPresentationSocket(
     socket.onerror = onError
   }
 
-  return () => {
-    // 1000: cierre normal de parte del cliente (el back responde 1001 al reiniciar).
-    socket.close(1000)
+  return {
+    disconnect: () => {
+      // 1000: cierre normal de parte del cliente (el back responde 1001 al reiniciar).
+      socket.close(1000)
+    },
+    send: (message) => {
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message))
+    },
   }
 }

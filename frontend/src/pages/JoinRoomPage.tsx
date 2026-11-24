@@ -1,27 +1,21 @@
 import { useEffect, useState, type FormEvent } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { SplitCard } from "../components/layout/SplitCard"
 import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
 import { ApiError } from "../services/http"
-import { createGuestUser, getRoom, joinRoom } from "../services/rooms"
+import { getRoom, joinRoom } from "../services/rooms"
 import { saveRoomKey } from "../utils/accessKey"
 import type { Room } from "../types"
 
-// Nombre autogenerado para la identidad efímera: el vínculo con la sala es la clave, no el
-// nombre. Cuando exista inicio de sesión, el usuario va a llegar acá con su cuenta real (o se
-// le va a pedir iniciar sesión o registrarse antes de este formulario) y el nombre va a salir
-// de la cuenta: "Invitado XXXX" queda solo como rótulo temporal en el header.
-function guestName(): string {
-  return `Invitado ${crypto.randomUUID().slice(0, 4).toUpperCase()}`
-}
-
-export default function GuestJoinPage() {
+// Ingreso a una sala ajena por enlace + clave. A diferencia de antes, no se crea una identidad
+// efímera: hace falta una cuenta con sesión iniciada para que el backend sepa quién entra.
+export default function JoinRoomPage() {
   const navigate = useNavigate()
-  const { signIn, session } = useSession()
+  const { session, signOut } = useSession()
   const [params] = useSearchParams()
-  // El enlace de invitación (RoomHeader) usa ?sala=; se tolera ?room= por enlaces viejos.
+  // El enlace de invitación usa ?sala=; se tolera ?room= por enlaces viejos.
   const roomId = params.get("sala") ?? params.get("room") ?? ""
 
   const [room, setRoom] = useState<Room | null | undefined>(undefined)
@@ -29,8 +23,6 @@ export default function GuestJoinPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
 
-  // La sala se conoce por el enlace: nombre y si pide clave. Sin ?sala= no hay a qué unirse:
-  // el backend no tiene búsqueda por clave (POST /rooms/:id/members necesita el id).
   useEffect(() => {
     if (!roomId) return setRoom(null)
     let active = true
@@ -43,27 +35,23 @@ export default function GuestJoinPage() {
     }
   }, [roomId])
 
+  // Sin token no hay userId real que mandar al backend: volver al login y regresar acá después.
+  if (session?.token === undefined) {
+    return <Navigate to="/login" state={{ from: `/unirse?sala=${roomId}` }} replace />
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!room) return
+    if (!room || session.userId === undefined) return
     setSubmitting(true)
     setError("")
     try {
-      // 1. Identidad real: si la sesión ya tiene userId (registro o invitación previa) se
-      //    reusa; si no, se crea una cuenta efímera con datos autogenerados.
-      let userId = session?.userId
-      if (userId === undefined) {
-        const user = await createGuestUser(guestName())
-        userId = user.id
-        signIn({ name: user.full_name, userId, guest: true })
-      }
-      // 2. POST /api/rooms/:id/members: valida la clave con bcrypt y queda como miembro real
-      //    (200 si ya era miembro, 201 si entra ahora). 403 = clave equivocada.
-      await joinRoom(room.id, { userId, accessKey: key || undefined })
-      // El dispositivo recuerda la clave con la que entró: el header de la sala la va a poder
-      // mostrar y copiar (ver utils/accessKey.ts).
+      // POST /api/rooms/:id/members valida la clave (403 = incorrecta) y deja al usuario como
+      // miembro real: 201 si entra ahora, 200 si ya pertenecía.
+      await joinRoom(room.id, { userId: session.userId, accessKey: key || undefined })
+      // El dispositivo recuerda la clave para poder mostrarla y copiarla en la sala.
       if (key) saveRoomKey(room.id, key)
-      navigate(`/salas/${room.id}`, { state: { role: "guest" } })
+      navigate(`/salas/${room.id}`)
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 403) setError("La clave no es correcta. Pedile la del anfitrión.")
@@ -91,11 +79,12 @@ export default function GuestJoinPage() {
 
   return (
     <SplitCard
-      title="Todo listo para entrar en sala"
-      text={<>Vas a entrar como invitado a <strong className="text-brand-700">{room.name}</strong>.</>}
+      title="Entrá a la sala"
+      text={<>Te invitaron a <strong className="text-brand-700">{room.name}</strong>. Ingresá con tu cuenta y la clave de la sala.</>}
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <h2 className="text-xl font-semibold text-brand-700">Unite a la sala</h2>
+        <p className="text-sm text-ink/70">Entrás como <strong>{session.name}</strong>.</p>
         {room.hasAccessKey ? (
           <Field label="Clave de la sala" placeholder="Ej. A7K-29P" value={key}
             onChange={(event) => setKey(event.target.value)} required autoFocus />
@@ -109,7 +98,13 @@ export default function GuestJoinPage() {
           {submitting ? "Entrando…" : "Ingresar"}
         </Button>
         <p className="text-sm text-ink/70">
-          ¿Sos el anfitrión? <Link to="/login" className="font-semibold text-brand-500 hover:underline">Iniciá sesión</Link>
+          ¿Querés entrar con otra cuenta?{" "}
+          <button type="button" onClick={() => {
+            signOut()
+            navigate("/login", { state: { from: `/unirse?sala=${room.id}` } })
+          }} className="font-semibold text-brand-500 hover:underline">
+            Cambiar de cuenta
+          </button>
         </p>
       </form>
     </SplitCard>

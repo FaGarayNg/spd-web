@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { GroupCard } from "../components/rooms/GroupCard"
+import { IndividualPresentations } from "../components/rooms/IndividualPresentations"
 import { ModeCard } from "../components/rooms/ModeCard"
 import { OwnPresentation } from "../components/rooms/OwnPresentation"
 import { PrepareRoom } from "../components/rooms/PrepareRoom"
@@ -11,12 +12,15 @@ import { SlideGallery } from "../components/rooms/SlideGallery"
 import { useSession } from "../context/SessionContext"
 import {
   assignGroupPresentation,
+  clearLiveSession,
   createGroup,
+  deleteRoom,
   getGroupPresentations,
   getLiveSession,
   getRoom,
   getRoomGroups,
   getRoomMembers,
+  getUserPresentations,
   joinGroup,
   leaveGroup,
   setLiveSession,
@@ -25,8 +29,8 @@ import {
 } from "../services/rooms"
 import { uploadPresentation } from "../services/live"
 import { ApiError } from "../services/http"
-import type { ApiPresentation, Group, LiveSession, Member, Role, Room } from "../types"
-import { getRoomKey } from "../utils/accessKey"
+import type { ApiPresentation, Group, LiveSession, Member, Role, Room, UserPresentation } from "../types"
+import { getRoomKey, removeRoomKey } from "../utils/accessKey"
 import { initials } from "../utils/initials"
 
 type Format = "group" | "individual"
@@ -39,6 +43,7 @@ export default function RoomPage() {
   const [room, setRoom] = useState<Room | null | undefined>(undefined)
   const [members, setMembers] = useState<Member[]>([])
   const [groups, setGroups] = useState<Group[]>([])
+  const [userPresentations, setUserPresentations] = useState<UserPresentation[]>([])
   const [mode, setMode] = useState<"own" | "watch">("watch")
   const [format, setFormat] = useState<Format>("group")
   const [settingUp, setSettingUp] = useState(false)
@@ -46,6 +51,7 @@ export default function RoomPage() {
   const [presentationId, setPresentationId] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
   const [loadError, setLoadError] = useState("")
+  const [closing, setClosing] = useState(false)
   const [attempt, setAttempt] = useState(0)
   // Presentaciones asignadas: groupId → asignación (o null si no tiene).
   const [assignments, setAssignments] = useState<Record<number, ApiPresentation | null>>({})
@@ -53,6 +59,9 @@ export default function RoomPage() {
   const [viewing, setViewing] = useState<{ presentationId: string; label: string } | null>(null)
   // Sesión en vivo de la sala (la publica el anfitrión): null mientras no haya ninguna.
   const [live, setLive] = useState<LiveSession | null>(null)
+  // Para detectar el ARRANQUE (no una sesión que ya estaba al entrar) y redirigir una sola vez.
+  const liveRef = useRef<LiveSession | null>(null)
+  const firstLiveCheck = useRef(true)
 
   // La sala existe y sus integrantes son de solo lectura: se cargan al entrar.
   useEffect(() => {
@@ -112,7 +121,7 @@ export default function RoomPage() {
     }
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") refresh()
-    }, 5000)
+    }, 2000)
     return () => {
       active = false
       window.clearInterval(timer)
@@ -127,22 +136,64 @@ export default function RoomPage() {
     else if (room?.format === "individual") setFormat("individual")
   }, [room?.format])
 
-  // La sesión en vivo se consulta cada tanto: así, cuando el anfitrión lanza una presentación,
-  // los invitados la ven aparecer (y desaparecer si la finaliza) sin recargar la página.
+  function loadIndividualPresentations() {
+    if (room == null) return
+    getUserPresentations(room.id)
+      .then(setUserPresentations)
+      .catch(() => undefined)
+  }
+
+  // Las presentaciones propias cambian cuando cualquier participante sube o quita la suya.
+  useEffect(() => {
+    if (room?.format !== "individual") return
+    loadIndividualPresentations()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") loadIndividualPresentations()
+    }, 4000)
+    return () => window.clearInterval(timer)
+  }, [room?.id, room?.format])
+
+  // Al cambiar de sala se reinicia la detección de arranque.
+  useEffect(() => {
+    liveRef.current = null
+    firstLiveCheck.current = true
+  }, [room?.id])
+
+  // La sesión en vivo se consulta cada tanto. Cuando cambia de "no hay" a "hay" (o se lanza
+  // otra), todos los que están en la sala van a la presentación; la primera lectura solo
+  // inicializa, para no sacar a alguien que llegó cuando ya estaba en curso.
   useEffect(() => {
     if (room == null) return
     let active = true
     const check = () => {
       getLiveSession(room.id)
         .then((result) => {
-          if (active) setLive(result)
+          if (!active) return
+          setLive(result)
+          if (firstLiveCheck.current) {
+            firstLiveCheck.current = false
+            liveRef.current = result
+            return
+          }
+          const previous = liveRef.current
+          const started = result !== null &&
+            (previous === null || result.startedAt !== previous.startedAt)
+          liveRef.current = result
+          if (started) {
+            navigate(`/salas/${room.id}/en-vivo`, {
+              state: {
+                role: session?.userId !== undefined && room.ownerId === session.userId ? "host" : "guest",
+                presentationId: result.presentationId,
+              },
+            })
+          }
         })
         .catch(() => undefined) // un fallo puntual se corrige con el siguiente intento
     }
     check()
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") check()
-    }, 5000)
+    }, 2000)
     return () => {
       active = false
       window.clearInterval(timer)
@@ -207,8 +258,10 @@ export default function RoomPage() {
 
   // El anfitrión es el dueño de la sala (la crea con sesión iniciada y el back le guarda el
   // owner_id): ya no viaja el rol por la navegación, lo decide el backend. Salas sin dueño
-  // (anteriores al login) o sesión de invitado: todos espectadores.
+  // (anteriores al login) o quien no es el dueño: espectadores.
   const isHost = session?.userId !== undefined && room.ownerId === session.userId
+  // En formato individual el anfitrión arma la sala pero no participa ni figura en el orden.
+  const participants = members.filter((member) => member.id !== room.ownerId)
   const role: Role = isHost ? "host" : "guest"
   // La sala está armada cuando el anfitrión confirmó un formato, o cuando ya tiene grupos (las
   // salas de antes del login no guardaban formato). Lo decide el backend, así lo ven todos igual.
@@ -235,6 +288,30 @@ export default function RoomPage() {
       )
   }
 
+  // Cerrar la sala está disponible siempre (incluso antes de presentar). Se limpia primero la
+  // sesión en vivo, aunque no haya empezado: DELETE es idempotente. Después el back borra en
+  // cascada grupos, presentaciones y pertenencias; acá solo olvidamos la clave guardada en este
+  // dispositivo, porque la sala ya no existe.
+  const closeRoom = async () => {
+    if (!room || closing) return
+    const confirmed = window.confirm(
+      `¿Cerrar la sala "${room.name}"? Se borrarán sus grupos, presentaciones y miembros. Esta acción no se puede deshacer.`,
+    )
+    if (!confirmed) return
+    setClosing(true)
+    setNotice("")
+    try {
+      await clearLiveSession(room.id).catch(() => undefined)
+      await deleteRoom(room.id)
+      removeRoomKey(room.id)
+      setLive(null)
+      navigate("/salas")
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "No se pudo cerrar la sala.")
+      setClosing(false)
+    }
+  }
+
   // El anfitrión arma (n × POST /api/rooms/:id/groups) la grilla real de grupos de la sala y
   // confirma el formato: el PATCH deja el cambio en el back, y el polling lo refleja en la
   // pantalla de todos.
@@ -254,7 +331,7 @@ export default function RoomPage() {
       .finally(() => setSettingUp(false))
   }
 
-  // Confirmar el formato individual también queda en el back: los invitados lo ven al momento.
+  // Confirmar el formato individual también queda en el back: los demás lo ven al momento.
   const confirmIndividual = () => {
     setNotice("")
     updateRoom(room.id, { format: "individual" })
@@ -269,7 +346,7 @@ export default function RoomPage() {
   const toggleGroup = (group: Group) => {
     const userId = session?.userId
     if (userId === undefined || !room) {
-      setNotice("Para unirte a un grupo registrate o entrá como invitado con la clave de la sala. Iniciar sesión todavía no está disponible en el servidor.")
+      setNotice("Para unirte a un grupo iniciá sesión (o registrate). Si te invitaron, usá el enlace y la clave de la sala.")
       return
     }
     setNotice("")
@@ -396,29 +473,46 @@ export default function RoomPage() {
                   ))}
                 </div>
               ) : (
-                <ul className="flex flex-col gap-2">
-                  {members.map((person, index) => (
-                    <li key={person.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface p-3">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">{initials(person.fullName)}</span>
-                      <strong className="flex-1 text-sm">{person.fullName}</strong>
-                      <small className="text-ink/60">{index === 0 ? "Listo para presentar" : "En espera"}</small>
-                    </li>
-                  ))}
-                </ul>
+                <IndividualPresentations
+                  roomId={room.id}
+                  members={participants}
+                  currentUserId={isHost ? undefined : session?.userId}
+                  presentations={userPresentations}
+                  onChanged={loadIndividualPresentations}
+                />
               )}
               {isHost && !preparing && <Button icon="sparkles" className="self-start" onClick={() => setPreparing(true)}>Preparar sala</Button>}
               {isHost && preparing && (
                 <PrepareRoom
                   items={
                     format === "individual"
-                      ? members.map((m) => ({ key: String(m.id), label: m.fullName, badge: initials(m.fullName) }))
+                      ? participants.map((m) => ({ key: String(m.id), label: m.fullName, badge: initials(m.fullName) }))
                       : groups.map((g) => ({
                           key: String(g.id),
                           label: `Grupo ${String(g.priority).padStart(2, "0")}`,
                           badge: `G${g.priority}`,
                         }))
                   }
-                  onStart={() => {
+                  onStart={(orderedKeys) => {
+                    if (format === "individual") {
+                      // El orden configurado decide quién empieza: se publica la presentación del
+                      // primero de la lista y se entra a la pantalla en vivo con ella.
+                      const first = userPresentations.find((p) => p.userId === Number(orderedKeys[0]))
+                      if (!first) {
+                        setNotice("Quien empieza según el orden todavía no cargó su presentación. Esperá a que lo haga.")
+                        return
+                      }
+                      setLiveSession(room.id, first.presentationId)
+                        .then((session) => {
+                          setLive(session)
+                          setPreparing(false)
+                          startLive(first.presentationId)
+                        })
+                        .catch((err: unknown) =>
+                          setNotice(err instanceof Error ? err.message : "No se pudo iniciar la presentación."),
+                        )
+                      return
+                    }
                     // El primer turno es el primer grupo con presentación asignada.
                     const first = groups.find((g) => assignments[g.id])
                     if (first) launch(assignments[first.id]!.presentation_id)
@@ -448,6 +542,20 @@ export default function RoomPage() {
             </section>
           )}
         </>
+      )}
+
+      {isHost && (
+        <section className="flex flex-col gap-2 rounded-lg border border-red-200 bg-surface p-4">
+          <div>
+            <h2 className="font-semibold text-brand-700">Cerrar sala</h2>
+            <p className="text-sm text-ink/60">
+              Disponible incluso antes de empezar. Borra los grupos, las presentaciones asignadas y los miembros; no se puede deshacer.
+            </p>
+          </div>
+          <Button variant="danger" icon="trash" className="self-start" onClick={closeRoom} disabled={closing}>
+            {closing ? "Cerrando…" : "Cerrar sala"}
+          </Button>
+        </section>
       )}
 
       {viewing && (

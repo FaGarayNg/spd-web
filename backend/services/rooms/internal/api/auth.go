@@ -56,6 +56,20 @@ func (h *Handler) me(c *gin.Context) {
 	h.reply(c, http.StatusOK, u, err)
 }
 
+// requireUser es currentUser pero además exige que haya identidad: la usan los endpoints que
+// actúan sobre el usuario de la sesión (presentación propia, perfil, etc.).
+func (h *Handler) requireUser(c *gin.Context) (uint, bool) {
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return 0, false
+	}
+	if caller == 0 {
+		platform.WriteError(c, http.StatusUnauthorized, domain.ErrUnauthenticated.Error())
+		return 0, false
+	}
+	return caller, true
+}
+
 // currentUser extrae la identidad de la cabecera Authorization (Bearer <token>). Sin cabecera
 // devuelve (0, false) y la petición sigue como anónima; con cabecera inválida responde 401 y
 // corta (un token vencido o falsificado no pasa como anónimo).
