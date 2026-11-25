@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"spd.web/internal/platform"
 	"spd.web/services/rooms/internal/domain"
 )
 
@@ -58,6 +59,40 @@ func (h *Handler) updateRoom(c *gin.Context) {
 		return
 	}
 	r, err := h.svc.UpdateRoom(c.Request.Context(), caller, id, in)
+	h.reply(c, http.StatusOK, r, err)
+}
+
+// updateRoomOrder guarda el orden de presentación elegido por el anfitrión. Se guarda en la sala
+// para que todos los integrantes vean el mismo orden al actualizar.
+func (h *Handler) updateRoomOrder(c *gin.Context) {
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	var in struct {
+		Kind string  `json:"kind"`
+		IDs  []int32 `json:"ids"`
+	}
+	if !bind(c, &in) {
+		return
+	}
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	ch := domain.RoomChanges{}
+	switch in.Kind {
+	case "individual":
+		ids := in.IDs
+		ch.IndividualOrder = &ids
+	case "groups":
+		ids := in.IDs
+		ch.GroupOrder = &ids
+	default:
+		platform.WriteError(c, http.StatusBadRequest, `kind debe ser "individual" o "groups"`)
+		return
+	}
+	r, err := h.svc.UpdateRoom(c.Request.Context(), caller, id, ch)
 	h.reply(c, http.StatusOK, r, err)
 }
 

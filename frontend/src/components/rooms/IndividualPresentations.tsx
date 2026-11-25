@@ -12,12 +12,13 @@ type Props = {
   presentations: UserPresentation[]
   /** Vuelve a consultar el listado después de subir o quitar. */
   onChanged: () => void
+  registerItem?: (key: string) => (element: HTMLElement | null) => void
 }
 
 // Cada participante sube su propio PDF/PPTX. El anfitrión arma la sala, define el orden y da el
 // inicio desde "Preparar sala": los participantes no lanzan su presentación desde acá.
 export function IndividualPresentations({
-  roomId, members, currentUserId, presentations, onChanged,
+  roomId, members, currentUserId, presentations, onChanged, registerItem,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -96,7 +97,7 @@ export function IndividualPresentations({
           const p = byUser.get(person.id)
           const isMine = person.id === currentUserId
           return (
-            <li key={person.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-3">
+            <li key={person.id} ref={registerItem?.(String(person.id))} className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface p-3">
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
                 {initials(person.fullName)}
               </span>

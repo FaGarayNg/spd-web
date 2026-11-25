@@ -17,6 +17,9 @@ export type ApiRoom = {
   owner_id: number
   /** Modo de presentación confirmado: "groups", "individual" o "" sin confirmar. */
   format: string
+  /** Orden elegido por el anfitrión; se comparte con todos los integrantes. */
+  individual_order: number[]
+  group_order: number[]
   has_access_key: boolean
   created_at: string
   updated_at: string
@@ -126,6 +129,8 @@ export type Room = {
   ownerId: number
   /** Modo de presentación confirmado ("groups" | "individual" | ""): la ven todos. */
   format: string
+  individualOrder: number[]
+  groupOrder: number[]
   hasAccessKey: boolean
   createdAt: string
   updatedAt: string

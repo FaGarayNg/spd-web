@@ -48,6 +48,7 @@ func (h *Handler) Register(r gin.IRouter) {
 	r.GET("/api/rooms", h.listRooms)
 	r.GET("/api/rooms/:id", h.getRoom)
 	r.PATCH("/api/rooms/:id", h.updateRoom)
+	r.PATCH("/api/rooms/:id/order", h.updateRoomOrder)
 	r.DELETE("/api/rooms/:id", h.deleteRoom)
 	r.GET("/api/rooms/:id/members", h.roomMembers)
 	r.POST("/api/rooms/:id/members", h.joinRoom)
@@ -72,6 +73,8 @@ func (h *Handler) Register(r gin.IRouter) {
 	r.GET("/api/groups/:id/presentations", h.groupPresentations)
 	r.POST("/api/groups/:id/presentations", h.addPresentation)
 	r.GET("/api/groups/:id/presentations/:presentation_id", h.getPresentation)
+	r.GET("/api/groups/:id/presentations/:presentation_id/preview", h.groupPreview)
+	r.GET("/api/groups/:id/presentations/:presentation_id/slides/:slide_id", h.groupSlide)
 	r.PATCH("/api/groups/:id/presentations/:presentation_id", h.updatePresentation)
 	r.DELETE("/api/groups/:id/presentations/:presentation_id", h.removePresentation)
 }

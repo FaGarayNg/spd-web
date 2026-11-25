@@ -17,10 +17,12 @@ type NewRoom struct {
 // AccessKey vacía quita la clave. Format confirma el modo de presentación (domain.FormatGroups
 // o domain.FormatIndividual).
 type RoomChanges struct {
-	Name      *string `json:"name"`
-	URL       *string `json:"url"`
-	AccessKey *string `json:"access_key"`
-	Format    *string `json:"format"`
+	Name            *string  `json:"name"`
+	URL             *string  `json:"url"`
+	AccessKey       *string  `json:"access_key"`
+	Format          *string  `json:"format"`
+	IndividualOrder *[]int32 `json:"individual_order"`
+	GroupOrder      *[]int32 `json:"group_order"`
 }
 
 // Join son los datos para unirse a una sala.
@@ -98,6 +100,8 @@ func (s *Service) UpdateRoom(ctx context.Context, callerID, id uint, in RoomChan
 		}
 		ch.Format = &v
 	}
+	ch.IndividualOrder = in.IndividualOrder
+	ch.GroupOrder = in.GroupOrder
 	return s.store.UpdateRoom(ctx, id, ch)
 }
 

@@ -136,12 +136,41 @@ func (s *Store) GroupMembers(ctx context.Context, groupID uint) ([]domain.Member
 	if err := take(db, &group{}, domain.ErrGroupNotFound, "id = ?", groupID); err != nil {
 		return nil, err
 	}
-	return members(db, "group_members", "group_id", groupID)
+	// El encargado es quien se unió primero: se ordena por fecha de ingreso, no por id de usuario.
+	return members(db, "group_members", "group_id", groupID, "group_members.created_at, users.id")
 }
 
 func (s *Store) RemoveGroupMember(ctx context.Context, groupID, userID uint) error {
-	res := s.db.WithContext(ctx).Where("group_id = ? AND user_id = ?", groupID, userID).Delete(&groupMember{})
-	return deleted(res, domain.ErrNotGroupMember)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("group_id = ? AND user_id = ?", groupID, userID).Delete(&groupMember{})
+		if err := deleted(res, domain.ErrNotGroupMember); err != nil {
+			return err
+		}
+		return clearPresentationIfEmpty(tx, groupID)
+	})
+}
+
+// clearPresentationIfEmpty quita la presentación asignada cuando el grupo se queda sin
+// integrantes. No hace falta que nadie la borre a mano: un grupo vacío no tiene qué presentar.
+func clearPresentationIfEmpty(tx *gorm.DB, groupID uint) error {
+	n, err := countMembers(tx, groupID)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return tx.Where("group_id = ?", groupID).Delete(&presentation{}).Error
+	}
+	return nil
+}
+
+// affectedGroupIds devuelve los grupos de una sala en los que estaba el usuario antes de salir.
+func affectedGroupIds(tx *gorm.DB, roomID, userID uint) ([]uint, error) {
+	groups := tx.Unscoped().Model(&group{}).Select("id").Where("room_id = ?", roomID)
+	var ids []uint
+	err := tx.Model(&groupMember{}).
+		Where("user_id = ? AND group_id IN (?)", userID, groups).
+		Pluck("group_id", &ids).Error
+	return ids, err
 }
 
 // countMembers cuenta los integrantes (no borrados) de un grupo.

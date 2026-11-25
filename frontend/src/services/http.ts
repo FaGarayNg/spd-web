@@ -114,3 +114,30 @@ export function apiUpload<T>(path: string, form: FormData): Promise<T> {
   return request<T>(path, { method: "POST", bodyRaw: form })
 }
 
+/** Imagen protegida: se baja con la cabecera de sesión y se devuelve como URL local. Un <img>
+ * normal no podría mandar el Bearer, por eso el preview privado usa este helper. */
+export async function apiImage(path: string): Promise<string> {
+  const token = getToken()
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      headers: token !== null ? { Authorization: `Bearer ${token}` } : {},
+    })
+  } catch {
+    throw new ApiError(0, UNREACHABLE)
+  }
+  if (!response.ok) {
+    let message = fallbackMessage(response.status)
+    if (response.status < 500) {
+      try {
+        const parsed: unknown = await response.json()
+        if (isErrorBody(parsed) && parsed.error) message = parsed.error
+      } catch {
+        // sin cuerpo JSON: se conserva el mensaje genérico
+      }
+    }
+    throw new ApiError(response.status, message)
+  }
+  return URL.createObjectURL(await response.blob())
+}
+

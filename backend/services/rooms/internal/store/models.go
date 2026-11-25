@@ -42,6 +42,9 @@ type room struct {
 	OwnerID *uint `gorm:"index"`
 	// Modo de presentación confirmado: "" sin confirmar, "groups" o "individual".
 	Format string `gorm:"size:20;not null;default:''"`
+	// Orden elegido por el anfitrión; se comparte con todos los integrantes de la sala.
+	IndividualOrder Array[int32] `gorm:"type:integer[];not null;default:'{}'"`
+	GroupOrder      Array[int32] `gorm:"type:integer[];not null;default:'{}'"`
 }
 
 func (room) TableName() string { return "rooms" }
@@ -52,6 +55,7 @@ func (r room) toDomain() domain.Room {
 		ownerID = *r.OwnerID
 	}
 	return domain.Room{ID: r.ID, Name: r.Name, URL: r.URL, OwnerID: ownerID, Format: r.Format,
+		IndividualOrder: nonNil(r.IndividualOrder), GroupOrder: nonNil(r.GroupOrder),
 		AccessKeyHash: r.AccessKeyHash, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 }
 
@@ -181,13 +185,13 @@ func (m memberRow) toDomain() domain.Member {
 
 // members lista los usuarios (no borrados) con pertenencia activa en table (room_members o
 // group_members) para parentID, ordenados por id.
-func members(db *gorm.DB, table, parentColumn string, parentID uint) ([]domain.Member, error) {
+func members(db *gorm.DB, table, parentColumn string, parentID uint, orderBy string) ([]domain.Member, error) {
 	var rows []memberRow
 	err := db.Model(&user{}).
 		Select("users.id, users.full_name, users.roles, "+table+".created_at AS joined_at").
 		Joins("JOIN "+table+" ON "+table+".user_id = users.id AND "+table+".deleted_at IS NULL").
 		Where(table+"."+parentColumn+" = ?", parentID).
-		Order("users.id").Scan(&rows).Error
+		Order(orderBy).Scan(&rows).Error
 	return mapList(rows, memberRow.toDomain), err
 }
 

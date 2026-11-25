@@ -69,7 +69,19 @@ func (s *Store) DeleteUser(ctx context.Context, id uint) error {
 		if err := tx.Where("user_id = ?", id).Delete(&userPresentation{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("user_id = ?", id).Delete(&groupMember{}).Error
+		var groupIDs []uint
+		if err := tx.Model(&groupMember{}).Where("user_id = ?", id).Pluck("group_id", &groupIDs).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", id).Delete(&groupMember{}).Error; err != nil {
+			return err
+		}
+		for _, groupID := range groupIDs {
+			if err := clearPresentationIfEmpty(tx, groupID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

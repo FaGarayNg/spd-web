@@ -189,17 +189,38 @@ func (s *Service) UpdatePresentation(ctx context.Context, callerID, groupID uint
 	return s.store.SetSlides(ctx, groupID, p.ID, slides)
 }
 
-// RemovePresentation quita (borrado lógico) una presentación de un grupo. Solo el anfitrión
-// puede: es una decisión sobre cómo va a presentar la clase.
+// RemovePresentation quita (borrado lógico) una presentación de un grupo. Puede hacerlo el
+// anfitrión o el encargado del grupo (su primer integrante), que es quien la cargó y puede
+// haberse equivocado. Los grupos vacíos los limpia el anfitrión.
 func (s *Service) RemovePresentation(ctx context.Context, callerID, groupID uint, presentationID string) error {
 	id, ok := platform.CanonicalUUID(presentationID)
 	if !ok {
 		return ErrPresentationNotFound
 	}
-	if err := s.checkOwnerOfGroup(ctx, callerID, groupID); err != nil {
+	g, err := s.store.GetGroup(ctx, groupID)
+	if err != nil {
 		return err
 	}
+	r, err := s.store.GetRoom(ctx, g.RoomID)
+	if err != nil {
+		return err
+	}
+	if callerID == 0 {
+		return ErrUnauthenticated
+	}
+	if r.OwnerID != callerID && !s.isEncargado(ctx, groupID, callerID) {
+		return ErrForbidden
+	}
 	return s.store.RemovePresentation(ctx, groupID, id)
+}
+
+// isEncargado dice si caller es el primer integrante activo del grupo.
+func (s *Service) isEncargado(ctx context.Context, groupID, callerID uint) bool {
+	members, err := s.store.GroupMembers(ctx, groupID)
+	if err != nil {
+		return false
+	}
+	return len(members) > 0 && members[0].ID == callerID
 }
 
 // checkSlides valida las diapositivas contra el número real de la presentación, que se consulta

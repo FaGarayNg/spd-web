@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -41,6 +43,25 @@ func (c fakeCatalog) SlideCount(_ context.Context, id string) (int, error) {
 		return 0, domain.ErrPresentationUnknown
 	}
 	return n, nil
+}
+
+func (c fakeCatalog) Preview(ctx context.Context, id string) (domain.PresentationPreview, error) {
+	n, err := c.SlideCount(ctx, id)
+	if err != nil {
+		return domain.PresentationPreview{}, err
+	}
+	slides := make([]domain.SlidePreview, 0, n)
+	for i := 1; i <= n; i++ {
+		slides = append(slides, domain.SlidePreview{Slide: i, File: fmt.Sprintf("%03d.png", i)})
+	}
+	return domain.PresentationPreview{PresentationID: id, SlideCount: n, Slides: slides}, nil
+}
+
+func (c fakeCatalog) SlideImage(ctx context.Context, id, _ string) (domain.SlideImage, error) {
+	if _, err := c.SlideCount(ctx, id); err != nil {
+		return domain.SlideImage{}, err
+	}
+	return domain.SlideImage{ContentType: "image/png", Body: io.NopCloser(strings.NewReader("img"))}, nil
 }
 
 var (
@@ -559,4 +580,90 @@ func TestUserPresentations(t *testing.T) {
 	expect(t, "anfitrión no participa", err, domain.ErrHostCannotPresent)
 	_, err = svc.PublishMyPresentation(ctx, hostID, r.ID)
 	expect(t, "anfitrión no publica", err, domain.ErrHostCannotPresent)
+}
+
+func TestGroupPreviewOnlyForMembers(t *testing.T) {
+	svc := newService(t, catalogOK)
+	r := mustRoom(t, svc, domain.NewRoom{Name: "Grupos privados"})
+	g := mustGroup(t, svc, r.ID, 4, 1)
+	mustAdd(t, svc, g.ID, domain.NewPresentation{PresentationID: pres3})
+	ana := mustUser(t, svc, "ana@preview.test")
+
+	if _, err := svc.GroupPreview(ctx, ana.ID, g.ID, pres3); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("sin pertenecer al grupo: err = %v", err)
+	}
+	if _, err := svc.GroupPreview(ctx, 0, g.ID, pres3); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("anónimo: err = %v", err)
+	}
+	if _, _, err := svc.JoinRoom(ctx, r.ID, domain.Join{UserID: ana.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.JoinGroup(ctx, g.ID, domain.GroupJoin{UserID: ana.ID}); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := svc.GroupPreview(ctx, ana.ID, g.ID, pres3)
+	if err != nil || preview.SlideCount != 3 {
+		t.Fatalf("preview = %+v, err = %v", preview, err)
+	}
+	img, err := svc.GroupSlide(ctx, ana.ID, g.ID, pres3, "1")
+	if err != nil {
+		t.Fatalf("imagen: %v", err)
+	}
+	_ = img.Body.Close()
+}
+
+func TestRemovePresentationByEncargadoOrHost(t *testing.T) {
+	svc := newService(t, catalogOK)
+	const hostID = uint(999)
+	r, err := svc.CreateRoom(ctx, hostID, domain.NewRoom{Name: "Quitar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := svc.CreateGroup(ctx, hostID, r.ID, domain.GroupFields{Limit: ptr(4), Priority: ptr(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddPresentation(ctx, hostID, g.ID, domain.NewPresentation{PresentationID: pres3}); err != nil {
+		t.Fatal(err)
+	}
+	ana := mustUser(t, svc, "encargado@quitar.test")
+	beto := mustUser(t, svc, "otro@quitar.test")
+	for _, u := range []domain.User{ana, beto} {
+		if _, _, err := svc.JoinRoom(ctx, r.ID, domain.Join{UserID: u.ID}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := svc.JoinGroup(ctx, g.ID, domain.GroupJoin{UserID: u.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Ana es la primera integrante: es la encargada y puede quitar lo que subió.
+	if err := svc.RemovePresentation(ctx, ana.ID, g.ID, pres3); err != nil {
+		t.Fatalf("encargada: %v", err)
+	}
+	_, err = svc.GetPresentation(ctx, g.ID, pres3)
+	expect(t, "presentación quitada", err, domain.ErrPresentationNotFound)
+
+	// Beto es integrante pero no encargado: no puede.
+	if _, err := svc.AddPresentation(ctx, hostID, g.ID, domain.NewPresentation{PresentationID: pres3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RemovePresentation(ctx, beto.ID, g.ID, pres3); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("integrante no encargado: err = %v", err)
+	}
+	if err := svc.RemovePresentation(ctx, 0, g.ID, pres3); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("anónimo: err = %v", err)
+	}
+
+	// Grupo sin integrantes: el anfitrión puede limpiar la presentación asignada.
+	g2, err := svc.CreateGroup(ctx, hostID, r.ID, domain.GroupFields{Limit: ptr(4), Priority: ptr(2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddPresentation(ctx, hostID, g2.ID, domain.NewPresentation{PresentationID: pres5}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RemovePresentation(ctx, hostID, g2.ID, pres5); err != nil {
+		t.Fatalf("grupo vacío: %v", err)
+	}
 }

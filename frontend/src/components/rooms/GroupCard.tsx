@@ -5,12 +5,14 @@ import { Button } from "../ui/Button"
 
 type Props = {
   group: Group
+  /** Usuario de la sesión, para saber si es el encargado del grupo. */
+  currentUserId?: number
   blocked?: boolean
   /** Presentación asignada al grupo, si tiene (la carga el padre: es dato de la sala). */
   presentation?: ApiPresentation | null
   /** true mientras el padre sube y asigna el archivo de ESTE grupo. */
   uploading?: boolean
-  /** Desasignar es solo del anfitrión: el back exige sesión y dueño de la sala (401/403). */
+  /** Desasignar: el anfitrión o el encargado del grupo (el back valida 401/403). */
   canManage?: boolean
   /** Solo el anfitrión lanza la presentación del grupo a la sesión en vivo. */
   canPresent?: boolean
@@ -26,6 +28,7 @@ type Props = {
 
 export function GroupCard({
   group,
+  currentUserId,
   blocked = false,
   presentation,
   uploading = false,
@@ -41,6 +44,8 @@ export function GroupCard({
   const [error, setError] = useState("")
   // Integrante de la sesión: lo marca la carga de datos (user_id de la sesión dentro del grupo).
   const joined = group.members.some((member) => member.joined)
+  // El encargado es quien aparece primero en el grupo; solo él carga la presentación.
+  const isEncargado = group.members[0]?.id === currentUserId
   const full = !joined && group.members.length >= group.limit
   const assigned = presentation != null
 
@@ -98,14 +103,14 @@ export function GroupCard({
             {canPresent && onPresent && (
               <Button variant="ghost" icon="play" onClick={onPresent}>Presentar</Button>
             )}
-            <Button variant="ghost" icon="eye" onClick={onView}>Ver diapositivas</Button>
-            {canManage && (
+            {joined && <Button variant="ghost" icon="eye" onClick={onView}>Ver diapositivas</Button>}
+            {(canManage || isEncargado) && (
               <Button variant="ghost" icon="trash" onClick={handleUnassign}>Quitar</Button>
             )}
           </div>
         </div>
       ) : (
-        joined && (
+        joined && isEncargado && (
           <>
             <input ref={inputRef} type="file" accept=".pdf,.pptx" className="hidden"
               onChange={handleFile} disabled={uploading} />
@@ -115,6 +120,9 @@ export function GroupCard({
             </Button>
           </>
         )
+      )}
+      {!assigned && joined && !isEncargado && (
+        <p className="text-sm text-ink/60">Solo el encargado del grupo carga la presentación.</p>
       )}
       {!assigned && uploading && (
         <p className="text-sm text-ink/60">Convirtiendo el archivo en diapositivas…</p>

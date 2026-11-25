@@ -56,6 +56,7 @@ func Register(r gin.IRouter, up Upstreams, log *slog.Logger) {
 	r.GET("/api/rooms", rooms)
 	r.GET("/api/rooms/:id", rooms)
 	r.PATCH("/api/rooms/:id", rooms)
+	r.PATCH("/api/rooms/:id/order", rooms)
 	r.DELETE("/api/rooms/:id", rooms)
 	r.GET("/api/rooms/:id/members", rooms)
 	r.POST("/api/rooms/:id/members", rooms)
@@ -80,6 +81,8 @@ func Register(r gin.IRouter, up Upstreams, log *slog.Logger) {
 	r.GET("/api/groups/:id/presentations", rooms)
 	r.POST("/api/groups/:id/presentations", rooms)
 	r.GET("/api/groups/:id/presentations/:presentation_id", rooms)
+	r.GET("/api/groups/:id/presentations/:presentation_id/preview", rooms)
+	r.GET("/api/groups/:id/presentations/:presentation_id/slides/:slide_id", rooms)
 	r.PATCH("/api/groups/:id/presentations/:presentation_id", rooms)
 	r.DELETE("/api/groups/:id/presentations/:presentation_id", rooms)
 }

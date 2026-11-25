@@ -124,16 +124,22 @@ type UserUpdate struct {
 // RoomUpdate son los cambios ya validados de una sala; los nil no cambian. Un AccessKeyHash
 // vacío quita la clave.
 type RoomUpdate struct {
-	Name          *string
-	URL           *string
-	AccessKeyHash *string
-	Format        *string
+	Name            *string
+	URL             *string
+	AccessKeyHash   *string
+	Format          *string
+	IndividualOrder *[]int32
+	GroupOrder      *[]int32
 }
 
 // Catalog consulta las presentaciones del servicio presentations (lo implementa el paquete
 // catalog). SlideCount devuelve ErrPresentationUnknown si el id no existe.
 type Catalog interface {
 	SlideCount(ctx context.Context, presentationID string) (int, error)
+	// Preview y SlideImage sirven al preview privado de los integrantes del grupo. Las
+	// devuelve el servicio presentations, pero el acceso lo decide este dominio.
+	Preview(ctx context.Context, presentationID string) (PresentationPreview, error)
+	SlideImage(ctx context.Context, presentationID, slideID string) (SlideImage, error)
 }
 
 // Service implementa los casos de uso: valida y normaliza los datos, guarda los secretos como

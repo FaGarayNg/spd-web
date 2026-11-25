@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { GroupCard } from "../components/rooms/GroupCard"
+import { GroupOverview } from "../components/rooms/GroupOverview"
 import { IndividualPresentations } from "../components/rooms/IndividualPresentations"
 import { ModeCard } from "../components/rooms/ModeCard"
 import { OwnPresentation } from "../components/rooms/OwnPresentation"
@@ -14,6 +15,7 @@ import {
   assignGroupPresentation,
   clearLiveSession,
   createGroup,
+  deleteGroup,
   deleteRoom,
   getGroupPresentations,
   getLiveSession,
@@ -26,14 +28,24 @@ import {
   setLiveSession,
   unassignGroupPresentation,
   updateRoom,
+  updateRoomOrder,
 } from "../services/rooms"
 import { uploadPresentation } from "../services/live"
 import { ApiError } from "../services/http"
 import type { ApiPresentation, Group, LiveSession, Member, Role, Room, UserPresentation } from "../types"
 import { getRoomKey, removeRoomKey } from "../utils/accessKey"
+import { useFlip } from "../utils/flip"
 import { initials } from "../utils/initials"
 
 type Format = "group" | "individual"
+
+// Ordena la lista real por las claves elegidas en el sorteo. Los que no estén en la lista
+// (p. ej. alguien que se suma después) quedan al final en su orden original.
+function applyOrder<T extends { id: number }>(items: T[], keys: string[]): T[] {
+  if (keys.length === 0) return items
+  const position = new Map(keys.map((key, index) => [Number(key), index]))
+  return [...items].sort((a, b) => (position.get(a.id) ?? Infinity) - (position.get(b.id) ?? Infinity))
+}
 
 export default function RoomPage() {
   const { id = "" } = useParams()
@@ -47,6 +59,8 @@ export default function RoomPage() {
   const [mode, setMode] = useState<"own" | "watch">("watch")
   const [format, setFormat] = useState<Format>("group")
   const [settingUp, setSettingUp] = useState(false)
+  const [editingFormat, setEditingFormat] = useState(false)
+  const [orderKeys, setOrderKeys] = useState<string[]>([])
   const [notice, setNotice] = useState("")
   const [presentationId, setPresentationId] = useState<string | null>(null)
   const [preparing, setPreparing] = useState(false)
@@ -56,12 +70,14 @@ export default function RoomPage() {
   // Presentaciones asignadas: groupId → asignación (o null si no tiene).
   const [assignments, setAssignments] = useState<Record<number, ApiPresentation | null>>({})
   const [uploadingGroupId, setUploadingGroupId] = useState<number | null>(null)
-  const [viewing, setViewing] = useState<{ presentationId: string; label: string } | null>(null)
+  const [viewing, setViewing] = useState<{ groupId: number; presentationId: string; label: string } | null>(null)
   // Sesión en vivo de la sala (la publica el anfitrión): null mientras no haya ninguna.
   const [live, setLive] = useState<LiveSession | null>(null)
   // Para detectar el ARRANQUE (no una sesión que ya estaba al entrar) y redirigir una sola vez.
   const liveRef = useRef<LiveSession | null>(null)
   const firstLiveCheck = useRef(true)
+  // Todos los hooks van antes de los returns anticipados de carga/error.
+  const registerFlip = useFlip(orderKeys.join(","))
 
   // La sala existe y sus integrantes son de solo lectura: se cargan al entrar.
   useEffect(() => {
@@ -135,6 +151,13 @@ export default function RoomPage() {
     if (room?.format === "groups") setFormat("group")
     else if (room?.format === "individual") setFormat("individual")
   }, [room?.format])
+
+  // El orden también vive en la sala: cualquiera que entre o actualice ve el mismo sorteo.
+  useEffect(() => {
+    if (room == null) return
+    const ids = format === "individual" ? room.individualOrder : room.groupOrder
+    setOrderKeys((ids ?? []).map(String))
+  }, [room?.id, format, room?.individualOrder, room?.groupOrder])
 
   function loadIndividualPresentations() {
     if (room == null) return
@@ -218,8 +241,8 @@ export default function RoomPage() {
   }, [room?.id])
 
   const reloadGroups = () => {
-    if (!room) return
-    getRoomGroups(room.id, session?.userId ?? null)
+    if (!room) return Promise.resolve()
+    return getRoomGroups(room.id, session?.userId ?? null)
       .then((result) => {
         setGroups(result)
         return loadAssignments(result)
@@ -261,15 +284,22 @@ export default function RoomPage() {
   // (anteriores al login) o quien no es el dueño: espectadores.
   const isHost = session?.userId !== undefined && room.ownerId === session.userId
   // En formato individual el anfitrión arma la sala pero no participa ni figura en el orden.
-  const participants = members.filter((member) => member.id !== room.ownerId)
+  // El sorteo reordena estas listas, no una vista interna del panel de preparación.
+  const participants = applyOrder(
+    members.filter((member) => member.id !== room.ownerId), orderKeys,
+  )
+  const orderedGroups = applyOrder(groups, orderKeys)
   const role: Role = isHost ? "host" : "guest"
   // La sala está armada cuando el anfitrión confirmó un formato, o cuando ya tiene grupos (las
   // salas de antes del login no guardaban formato). Lo decide el backend, así lo ven todos igual.
   const configured = room.format !== "" || groups.length > 0
   const activeMode = isHost ? mode : "watch"
   const showList = !isHost || configured
-  const startLive = (livePresentationId: string | null) =>
-    navigate(`/salas/${room.id}/en-vivo`, { state: { role, presentationId: livePresentationId } })
+  const startLive = (livePresentationId: string | null, order: string[] = []) => {
+    // El orden viaja con la navegación y se guarda para sobrevivir una recarga del anfitrión.
+    if (order.length) sessionStorage.setItem(`spd.order.${room.id}`, JSON.stringify(order))
+    navigate(`/salas/${room.id}/en-vivo`, { state: { role, presentationId: livePresentationId, order } })
+  }
   // "En sala" son las personas de la sala, no la suma de los grupos (así nadie se cuenta dos veces).
   const inRoom = members.length
   const inAnyGroup = groups.some((g) => g.members.some((m) => m.joined))
@@ -315,30 +345,52 @@ export default function RoomPage() {
   // El anfitrión arma (n × POST /api/rooms/:id/groups) la grilla real de grupos de la sala y
   // confirma el formato: el PATCH deja el cambio en el back, y el polling lo refleja en la
   // pantalla de todos.
-  const confirmGroups = (count: number, limit: number) => {
-    setSettingUp(true)
-    setNotice("")
-    const creates = Array.from({ length: count }, (_, index) =>
-      createGroup(room.id, { limit, priority: index + 1 }),
-    )
-    Promise.all(creates)
-      .then(() => updateRoom(room.id, { format: "groups" }))
-      .then((updated) => setRoom(updated))
-      .then(() => reloadGroups())
-      .catch((err: unknown) =>
-        setNotice(err instanceof Error ? err.message : "No se pudieron crear los grupos."),
-      )
-      .finally(() => setSettingUp(false))
+  // Cambiar de formato empieza de cero: se borran los grupos anteriores (con sus miembros y
+  // presentaciones) para que la nueva cantidad y el nuevo límite se apliquen de verdad.
+  const clearGroupsForFormatChange = async () => {
+    if (groups.length === 0) return
+    await clearLiveSession(room.id).catch(() => undefined)
+    await Promise.all(groups.map((group) => deleteGroup(group.id)))
+    setGroups([])
+    setAssignments({})
+    setLive(null)
+    setOrderKeys([])
+    await updateRoomOrder(room.id, "individual", []).catch(() => undefined)
+    await updateRoomOrder(room.id, "groups", []).catch(() => undefined)
   }
 
-  // Confirmar el formato individual también queda en el back: los demás lo ven al momento.
-  const confirmIndividual = () => {
+  const confirmGroups = async (count: number, limit: number) => {
     setNotice("")
-    updateRoom(room.id, { format: "individual" })
-      .then((updated) => setRoom(updated))
-      .catch((err: unknown) =>
-        setNotice(err instanceof Error ? err.message : "No se pudo confirmar el formato."),
+    setSettingUp(true)
+    try {
+      await clearGroupsForFormatChange()
+      await Promise.all(
+        Array.from({ length: count }, (_, index) =>
+          createGroup(room.id, { limit, priority: index + 1 }),
+        ),
       )
+      const updated = await updateRoom(room.id, { format: "groups" })
+      setRoom(updated)
+      await reloadGroups()
+      setEditingFormat(false)
+    } catch (err: unknown) {
+      setNotice(err instanceof Error ? err.message : "No se pudieron crear los grupos.")
+    } finally {
+      setSettingUp(false)
+    }
+  }
+
+  // Al pasar a individual se limpian los grupos: así, volver a grupos es un inicio limpio.
+  const confirmIndividual = async () => {
+    setNotice("")
+    try {
+      await clearGroupsForFormatChange()
+      const updated = await updateRoom(room.id, { format: "individual" })
+      setRoom(updated)
+      setEditingFormat(false)
+    } catch (err: unknown) {
+      setNotice(err instanceof Error ? err.message : "No se pudo confirmar el formato.")
+    }
   }
 
   // Integrarse a un grupo hace POST /api/groups/:id/members con el userId de la sesión; si no
@@ -380,16 +432,16 @@ export default function RoomPage() {
   }
 
   // Desasignar no borra la presentación del servicio presentations: solo la desvincula del grupo.
-  const handleUnassign = async (group: Group) => {
-    const assigned = assignments[group.id]
+  const handleUnassign = async (groupId: number) => {
+    const assigned = assignments[groupId]
     if (!assigned) return
-    await unassignGroupPresentation(group.id, assigned.presentation_id)
-    setAssignments((current) => ({ ...current, [group.id]: null }))
+    await unassignGroupPresentation(groupId, assigned.presentation_id)
+    setAssignments((current) => ({ ...current, [groupId]: null }))
   }
 
   const handleView = (group: Group) => {
     const assigned = assignments[group.id]
-    if (assigned) setViewing({ presentationId: assigned.presentation_id, label: `Grupo ${String(group.priority).padStart(2, "0")}` })
+    if (assigned) setViewing({ groupId: group.id, presentationId: assigned.presentation_id, label: `Grupo ${String(group.priority).padStart(2, "0")}` })
   }
 
   return (
@@ -409,6 +461,48 @@ export default function RoomPage() {
             <ModeCard active={mode === "own"} icon="file" title="Presentación propia" text="Exponé tu archivo" onClick={() => setMode("own")} />
             <ModeCard active={mode === "watch"} icon="people" title="Ver presentaciones" text="Organizá a tu clase" onClick={() => setMode("watch")} />
           </div>
+          {configured && !editingFormat && (
+            <Button variant="secondary" icon="edit" className="w-full sm:w-auto sm:self-start"
+              onClick={() => setEditingFormat(true)}>
+              Cambiar modo de presentación
+            </Button>
+          )}
+        </section>
+      )}
+
+      {isHost && (!configured || editingFormat) && (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold text-brand-700">
+              {configured ? "Cambiar formato de la sala" : "Elegí el formato de la sala"}
+            </h2>
+            {configured && (
+              <Button variant="ghost" onClick={() => setEditingFormat(false)}>Cancelar</Button>
+            )}
+          </div>
+          <div className="flex gap-6 overflow-x-auto border-b border-border" role="tablist">
+            {(["individual", "group"] as const).map((item) => (
+              <button key={item} role="tab" aria-selected={format === item} onClick={() => setFormat(item)}
+                className={`-mb-px border-b-2 px-1 pb-3 text-sm font-semibold ${
+                  format === item ? "border-accent text-brand-700" : "border-transparent text-ink/60 hover:text-brand-700"
+                }`}>
+                {item === "group" ? "En grupo" : "Individual"}
+              </button>
+            ))}
+          </div>
+          {format === "group" ? (
+            <SetupGroups onConfirm={confirmGroups} busy={settingUp} />
+          ) : (
+            <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 sm:p-6">
+              <h2 className="text-base font-semibold text-brand-700 sm:text-lg">Formato individual</h2>
+              <p className="text-ink/70">
+                Cada participante carga su archivo y presenta. {members.length} {members.length === 1 ? "persona" : "personas"} en la sala.
+              </p>
+              <Button icon="check" className="w-full sm:w-auto sm:self-start" onClick={confirmIndividual}>
+                {configured ? "Cambiar a individual" : "Activar formato individual"}
+              </Button>
+            </div>
+          )}
         </section>
       )}
 
@@ -419,59 +513,45 @@ export default function RoomPage() {
         />
       ) : (
         <>
-          {isHost && !configured && (
-            <section className="flex flex-col gap-4">
-              <div className="flex gap-6 overflow-x-auto border-b border-border" role="tablist">
-                {(["individual", "group"] as const).map((item) => (
-                  <button key={item} role="tab" aria-selected={format === item} onClick={() => setFormat(item)}
-                    className={`-mb-px border-b-2 px-1 pb-3 text-sm font-semibold ${
-                      format === item ? "border-accent text-brand-700" : "border-transparent text-ink/60 hover:text-brand-700"
-                    }`}>
-                    {item === "group" ? "En grupo" : "Individual"}
-                  </button>
-                ))}
-              </div>
-              {format === "group" ? (
-                <SetupGroups onConfirm={confirmGroups} busy={settingUp} />
-              ) : (
-                <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4 sm:p-6">
-                  <h2 className="text-base font-semibold text-brand-700 sm:text-lg">Formato individual</h2>
-                  <p className="text-ink/70">
-                    Cada participante carga su archivo y presenta. {members.length} {members.length === 1 ? "persona" : "personas"} en la sala.
-                  </p>
-                  <Button icon="check" className="w-full sm:w-auto sm:self-start" onClick={confirmIndividual}>Activar formato individual</Button>
-                </div>
-              )}
-            </section>
-          )}
-
           {showList && (
             <section className="flex flex-col gap-5">
               <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
                 <h2 className="text-base font-semibold text-brand-700 sm:text-lg">
-                  {format === "group" ? `${groups.length} grupos: elegí tu equipo` : `Personas en la sala (${members.length})`}
+                  {format === "group"
+                    ? isHost ? `${groups.length} grupos` : `${groups.length} grupos: elegí tu equipo`
+                    : `Personas en la sala (${members.length})`}
                 </h2>
                 <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-700">{inRoom} en sala</span>
               </div>
               {format === "group" ? (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {groups.map((group) => (
-                    <GroupCard
-                      key={group.id}
-                      group={group}
-                      blocked={inAnyGroup && !group.members.some((m) => m.joined)}
-                      presentation={assignments[group.id] ?? null}
-                      uploading={uploadingGroupId === group.id}
-                      canManage={isHost}
-                      onToggle={() => toggleGroup(group)}
-                      onUpload={(file) => handleUpload(group, file)}
-                      onUnassign={() => handleUnassign(group)}
-                      onView={() => handleView(group)}
-                      canPresent={isHost}
-                      onPresent={assignments[group.id] ? () => launch(assignments[group.id]!.presentation_id) : undefined}
-                    />
-                  ))}
-                </div>
+                isHost ? (
+                  <>
+                    <p className="text-sm text-ink/60">
+                      Así quedó la grilla. Los participantes eligen su equipo y cargan su archivo; vos definís el orden.
+                    </p>
+                    <GroupOverview groups={orderedGroups} registerItem={registerFlip} />
+                  </>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {orderedGroups.map((group) => (
+                      <div key={group.id} ref={registerFlip(String(group.id))}>
+                        <GroupCard
+                        group={group}
+                        currentUserId={session?.userId}
+                        blocked={inAnyGroup && !group.members.some((m) => m.joined)}
+                        presentation={assignments[group.id] ?? null}
+                        uploading={uploadingGroupId === group.id}
+                        canManage={false}
+                        onToggle={() => toggleGroup(group)}
+                        onUpload={(file) => handleUpload(group, file)}
+                        onUnassign={() => handleUnassign(group.id)}
+                        onView={() => handleView(group)}
+                        canPresent={false}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : (
                 <IndividualPresentations
                   roomId={room.id}
@@ -479,6 +559,7 @@ export default function RoomPage() {
                   currentUserId={isHost ? undefined : session?.userId}
                   presentations={userPresentations}
                   onChanged={loadIndividualPresentations}
+                  registerItem={registerFlip}
                 />
               )}
               {isHost && !preparing && <Button icon="sparkles" className="w-full sm:w-auto sm:self-start" onClick={() => setPreparing(true)}>Preparar sala</Button>}
@@ -487,12 +568,24 @@ export default function RoomPage() {
                   items={
                     format === "individual"
                       ? participants.map((m) => ({ key: String(m.id), label: m.fullName, badge: initials(m.fullName) }))
-                      : groups.map((g) => ({
+                      : orderedGroups.map((g) => ({
                           key: String(g.id),
                           label: `Grupo ${String(g.priority).padStart(2, "0")}`,
                           badge: `G${g.priority}`,
                         }))
                   }
+                  onOrderChange={(keys, sortMode) => {
+                    const next = sortMode === "ordered" ? [] : keys
+                    setOrderKeys(next)
+                    if (isHost && room) {
+                      const kind = format === "group" ? "groups" : "individual"
+                      updateRoomOrder(room.id, kind, next.map(Number))
+                        .then(setRoom)
+                        .catch((err: unknown) =>
+                          setNotice(err instanceof Error ? err.message : "No se pudo guardar el orden."),
+                        )
+                    }
+                  }}
                   onStart={(orderedKeys) => {
                     if (format === "individual") {
                       // El orden configurado decide quién empieza: se publica la presentación del
@@ -506,7 +599,7 @@ export default function RoomPage() {
                         .then((session) => {
                           setLive(session)
                           setPreparing(false)
-                          startLive(first.presentationId)
+                          startLive(first.presentationId, orderedKeys)
                         })
                         .catch((err: unknown) =>
                           setNotice(err instanceof Error ? err.message : "No se pudo iniciar la presentación."),
@@ -559,7 +652,7 @@ export default function RoomPage() {
       )}
 
       {viewing && (
-        <SlideGallery presentationId={viewing.presentationId} label={viewing.label} onClose={() => setViewing(null)} />
+        <SlideGallery groupId={viewing.groupId} presentationId={viewing.presentationId} label={viewing.label} onClose={() => setViewing(null)} />
       )}
     </div>
   )

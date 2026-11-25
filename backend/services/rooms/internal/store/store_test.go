@@ -141,6 +141,11 @@ func TestRejoinAndReassignReuseTheRow(t *testing.T) {
 		t.Fatalf("filas del integrante = %d, se esperaba 1", n)
 	}
 
+	// Al quedarse el grupo vacío se quitó su presentación automáticamente: la reasignamos
+	// para seguir probando que la clave natural no se puede repetir en otro grupo.
+	if _, err := st.AddPresentation(ctx, domain.Presentation{ID: pres1, GroupID: g.ID, Slides: []int32{1, 2}}); err != nil {
+		t.Fatal(err)
+	}
 	other, err := st.CreateGroup(ctx, domain.Group{RoomID: r.ID, Limit: 3, Priority: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -366,5 +371,62 @@ func TestTimestampsMatchTheDatabase(t *testing.T) {
 	read, err := st.GetRoom(ctx, created.ID)
 	if err != nil || !read.CreatedAt.Equal(created.CreatedAt) || !read.UpdatedAt.Equal(created.UpdatedAt) {
 		t.Fatalf("alta %v / %v, lectura %v / %v (%v)", created.CreatedAt, created.UpdatedAt, read.CreatedAt, read.UpdatedAt, err)
+	}
+}
+
+func TestEmptyGroupLosesItsPresentation(t *testing.T) {
+	st, db := newStore(t)
+	u, _, g := fixture(t, st)
+	active := "SELECT count(*) FROM presentations WHERE group_id = ? AND deleted_at IS NULL"
+	if n := count(t, db, active, g.ID); n != 1 {
+		t.Fatalf("presentaciones activas = %d, se esperaba 1", n)
+	}
+	if err := st.RemoveGroupMember(ctx, g.ID, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, active, g.ID); n != 0 {
+		t.Fatalf("grupo vacío conserva %d presentaciones", n)
+	}
+}
+
+func TestEncargadoIsFirstToJoinNotLowestId(t *testing.T) {
+	st, _ := newStore(t)
+	u1, err := st.CreateUser(ctx, domain.User{FullName: "Primero", Email: "primero@grupo.test", PasswordHash: "hash", Roles: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u2, err := st.CreateUser(ctx, domain.User{FullName: "Segundo", Email: "segundo@grupo.test", PasswordHash: "hash", Roles: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u1.ID >= u2.ID {
+		t.Fatalf("se esperaba id de primero menor que el de segundo: %d, %d", u1.ID, u2.ID)
+	}
+	r, err := st.CreateRoom(ctx, domain.Room{Name: "Orden de ingreso"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := st.CreateGroup(ctx, domain.Group{RoomID: r.ID, Limit: 5, Priority: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []domain.User{u1, u2} {
+		if _, _, err := st.AddRoomMember(ctx, r.ID, u.ID, admitAll); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Se une primero el usuario con id mayor: debe seguir siendo el encargado.
+	if _, _, err := st.AddGroupMember(ctx, g.ID, u2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.AddGroupMember(ctx, g.ID, u1.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.GroupMembers(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].ID != u2.ID {
+		t.Fatalf("integrantes = %+v, se esperaba primero a %d", list, u2.ID)
 	}
 }

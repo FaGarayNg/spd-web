@@ -45,6 +45,12 @@ func (s *Store) UpdateRoom(ctx context.Context, id uint, ch domain.RoomUpdate) (
 	if ch.Format != nil {
 		changes["format"] = *ch.Format
 	}
+	if ch.IndividualOrder != nil {
+		changes["individual_order"] = Array[int32](*ch.IndividualOrder)
+	}
+	if ch.GroupOrder != nil {
+		changes["group_order"] = Array[int32](*ch.GroupOrder)
+	}
 	var row room
 	if err := s.update(ctx, &row, id, domain.ErrRoomNotFound, changes); err != nil {
 		return domain.Room{}, err
@@ -114,7 +120,7 @@ func (s *Store) RoomMembers(ctx context.Context, roomID uint) ([]domain.Member, 
 	if err := take(db, &room{}, domain.ErrRoomNotFound, "id = ?", roomID); err != nil {
 		return nil, err
 	}
-	return members(db, "room_members", "room_id", roomID)
+	return members(db, "room_members", "room_id", roomID, "users.id")
 }
 
 // RemoveRoomMember saca al usuario de la sala y de los grupos de esa sala.
@@ -127,7 +133,19 @@ func (s *Store) RemoveRoomMember(ctx context.Context, roomID, userID uint) error
 		if err := tx.Where("room_id = ? AND user_id = ?", roomID, userID).Delete(&userPresentation{}).Error; err != nil {
 			return err
 		}
-		groups := tx.Unscoped().Model(&group{}).Select("id").Where("room_id = ?", roomID)
-		return tx.Where("user_id = ? AND group_id IN (?)", userID, groups).Delete(&groupMember{}).Error
+		groupIds, err := affectedGroupIds(tx, roomID, userID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND group_id IN (?)", userID,
+			tx.Unscoped().Model(&group{}).Select("id").Where("room_id = ?", roomID)).Delete(&groupMember{}).Error; err != nil {
+			return err
+		}
+		for _, groupID := range groupIds {
+			if err := clearPresentationIfEmpty(tx, groupID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }

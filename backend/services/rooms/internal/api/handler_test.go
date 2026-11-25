@@ -44,6 +44,25 @@ func (fakeCatalog) SlideCount(_ context.Context, id string) (int, error) {
 	return 0, domain.ErrPresentationUnknown
 }
 
+func (c fakeCatalog) Preview(ctx context.Context, id string) (domain.PresentationPreview, error) {
+	n, err := c.SlideCount(ctx, id)
+	if err != nil {
+		return domain.PresentationPreview{}, err
+	}
+	slides := make([]domain.SlidePreview, 0, n)
+	for i := 1; i <= n; i++ {
+		slides = append(slides, domain.SlidePreview{Slide: i, File: fmt.Sprintf("%03d.png", i)})
+	}
+	return domain.PresentationPreview{PresentationID: id, SlideCount: n, Slides: slides}, nil
+}
+
+func (c fakeCatalog) SlideImage(ctx context.Context, id, _ string) (domain.SlideImage, error) {
+	if _, err := c.SlideCount(ctx, id); err != nil {
+		return domain.SlideImage{}, err
+	}
+	return domain.SlideImage{ContentType: "image/png", Body: io.NopCloser(strings.NewReader("img"))}, nil
+}
+
 func newServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

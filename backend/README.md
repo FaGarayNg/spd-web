@@ -258,6 +258,7 @@ lo borrado deja de verse en la API, pero sigue en la base de datos.
 | `/api/users/:id/groups`                          | `GET`                    | Grupos de los que es integrante                                 |
 | `/api/rooms`                                     | `GET`, `POST`            | Salas                                                           |
 | `/api/rooms/:id`                                 | `GET`, `PATCH`, `DELETE` | Una sala (borrarla borra sus grupos, presentaciones y miembros) |
+| `/api/rooms/:id/order`                           | `PATCH`                  | Guarda el orden de presentación elegido (solo el anfitrión)      |
 | `/api/rooms/:id/members`                         | `GET`, `POST`            | Miembros (`GET` los lista, ver abajo; `POST` une a uno)         |
 | `/api/rooms/:id/members/:user_id`                | `DELETE`                 | Saca a un usuario de la sala y de sus grupos                    |
 | `/api/rooms/:id/groups`                          | `GET`, `POST`            | Grupos de la sala, en orden de paso para presentar              |
@@ -270,9 +271,28 @@ lo borrado deja de verse en la API, pero sigue en la base de datos.
 | `/api/groups/:id/members/:user_id`               | `DELETE`                 | Saca a un usuario del grupo                                     |
 | `/api/groups/:id/presentations`                  | `GET`, `POST`            | Presentaciones asignadas al grupo                               |
 | `/api/groups/:id/presentations/:presentation_id` | `GET`, `PATCH`, `DELETE` | Una presentación asignada                                       |
+| `/api/groups/:id/presentations/:presentation_id/preview` | `GET`             | Metadatos del preview: solo integrantes del grupo                |
+| `/api/groups/:id/presentations/:presentation_id/slides/:slide_id` | `GET` | Imagen del preview: solo integrantes del grupo                 |
 
 `POST` responde 201 con el recurso y la cabecera `Location`; `GET`, `PATCH` y `PUT`, 200 con el
 recurso; `DELETE`, 204 sin cuerpo. `PATCH` cambia solo los campos enviados.
+
+`PATCH /api/rooms/:id/order` guarda el orden del sorteo en la sala (`{"kind":"groups"|"individual",
+"ids":[...]}`; lista vacía = orden natural). Lo escribe solo el anfitrión y `GET /api/rooms/:id`
+lo devuelve a todos, así los integrantes ven el mismo orden sin depender de lo que tenga cada
+navegador en memoria.
+
+Quitar una presentación asignada (`DELETE /api/groups/:id/presentations/:presentation_id`) puede
+hacerlo el anfitrión o el **encargado** del grupo (su primer integrante), que es quien la cargó.
+Los demás integrantes reciben 403. Cuando el último integrante sale del grupo (o sale de la sala
+o se borra su usuario), `store` quita la presentación asignada **automáticamente** en la misma
+transacción: un grupo vacío no necesita que nadie intervenga.
+
+El preview de las diapositivas de un grupo **no** usa el endpoint público de `presentations`:
+`GET /preview` y `GET /slides/:slide_id` pasan por `rooms`, que exige sesión y comprueba que el
+usuario integre ese grupo (401 sin sesión, 403 si no). El anfitrión no puede espiar un grupo del
+que no forma parte. Las imágenes de la presentación en vivo siguen siendo públicas: son las que
+ven todos los espectadores.
 
 En formato individual, `POST /api/rooms/:id/my-presentation` asigna la propia con
 `{"presentation_id": "<uuid>", "slides": [1, 2]}` (`slides` opcional; sin él, todas). El usuario
@@ -319,7 +339,9 @@ curl -X POST -H 'Content-Type: application/json' \
 
 Los listados de miembros de una sala y de integrantes de un grupo muestran a cada usuario
 solo lo que necesitan ver los demás: sin su correo ni las fechas de su cuenta, que solo
-devuelven `/api/users` y `/api/users/:id`. `joined_at` es cuándo entró.
+devuelven `/api/users` y `/api/users/:id`. `joined_at` es cuándo entró. Los integrantes de un
+grupo se listan por **fecha de ingreso** (no por id): el primero es el "Encargado", que conserva
+el puesto aunque después se sume alguien con id menor.
 
 ```json
 [{"id": 1, "full_name": "Ana López", "roles": ["presentador"], "joined_at": "2026-10-09T12:00:00Z"}]
@@ -437,7 +459,7 @@ inglés, como el resto del código:
 | Usuario        | `users`         | `id`, `full_name`, `email`, `password_hash`, `roles text[]`           |
 | DetalleSala    | `room_members`  | `user_id` y `room_id`: clave primaria compuesta y claves foráneas     |
 | DetalleGrupo   | `group_members` | `user_id` y `group_id`: clave primaria compuesta y claves foráneas (n:m) |
-| Sala           | `rooms`         | `id`, `name`, `url`, `access_key_hash`, `owner_id` (índice), `format` |
+| Sala           | `rooms`         | `id`, `name`, `url`, `access_key_hash`, `owner_id` (índice), `format`, `individual_order integer[]`, `group_order integer[]` |
 | Grupo          | `groups`        | `id`, `room_id` (FK), `limit` (cupo), `priority` (prioridad de paso)  |
 | Presentacion   | `presentations` | `id uuid` (el del servicio presentations), `group_id` (FK), `slides integer[]` |
 | Presentación propia | `user_presentations` | `id`, `room_id` (FK), `user_id` (FK), `presentation_id uuid`, `slides integer[]`; única por `(room_id, user_id)` |

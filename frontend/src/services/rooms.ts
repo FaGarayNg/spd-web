@@ -10,6 +10,7 @@ import type {
   ApiRoomJoin,
   ApiRoomMember,
   ApiPresentation,
+  ApiPresentationDetail,
   ApiUser,
   ApiUserPresentation,
   Group,
@@ -34,6 +35,8 @@ const toRoom = (api: ApiRoom): Room => ({
   url: api.url,
   ownerId: api.owner_id,
   format: api.format,
+  individualOrder: api.individual_order,
+  groupOrder: api.group_order,
   hasAccessKey: api.has_access_key,
   createdAt: api.created_at,
   updatedAt: api.updated_at,
@@ -70,6 +73,16 @@ export function updateRoom(
   if (changes.accessKey !== undefined) body.access_key = changes.accessKey
   if (changes.format !== undefined) body.format = changes.format
   return apiSend<ApiRoom>(`/rooms/${roomId}`, "PATCH", body).then(toRoom)
+}
+
+/** Guarda el orden de presentación elegido. Solo el anfitrión. `kind` es "individual" o "groups";
+ * una lista vacía vuelve al orden natural. PATCH /api/rooms/:id/order */
+export function updateRoomOrder(
+  roomId: number,
+  kind: "individual" | "groups",
+  ids: number[],
+): Promise<Room> {
+  return apiSend<ApiRoom>(`/rooms/${roomId}/order`, "PATCH", { kind, ids }).then(toRoom)
 }
 
 /** Cierra (borra) una sala. Solo el anfitrión: el back devuelve 401 sin sesión o 403 si no es
@@ -126,6 +139,11 @@ export async function getRoomGroups(roomId: number, sessionUserId: number | null
   )
 }
 
+/** Borra un grupo (y sus presentaciones e integrantes). DELETE /api/groups/:id */
+export function deleteGroup(groupId: number): Promise<void> {
+  return apiSend<void>(`/groups/${groupId}`, "DELETE")
+}
+
 /** Crea un grupo en la sala. POST /api/rooms/:id/groups */
 export function createGroup(roomId: number, fields: { limit?: number; priority?: number }): Promise<ApiGroup> {
   const body: ApiGroupFields = {
@@ -155,6 +173,12 @@ export function leaveGroup(groupId: number, userId: number): Promise<void> {
 /** Presentaciones asignadas a un grupo. GET /api/groups/:id/presentations */
 export function getGroupPresentations(groupId: number): Promise<ApiPresentation[]> {
   return apiGet<ApiPresentation[]>(`/groups/${groupId}/presentations`)
+}
+
+/** Preview privado: el back verifica que el usuario sea integrante del grupo. Las imágenes
+ * vienen por rutas protegidas por rooms (ver apiImage). */
+export function getGroupPreview(groupId: number, presentationId: string): Promise<ApiPresentationDetail> {
+  return apiGet<ApiPresentationDetail>(`/groups/${groupId}/presentations/${presentationId}/preview`)
 }
 
 /** Asigna una presentación (subida a /api/presentations/upload) al grupo: la ve entera.

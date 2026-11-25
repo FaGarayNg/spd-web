@@ -4,12 +4,12 @@ import { SlideStage } from "../components/live/SlideStage"
 import { Button } from "../components/ui/Button"
 import { Icon } from "../components/ui/Icon"
 import { controlPresentation, connectPresentationSocket, type ControlCommand, type LiveSocket } from "../services/live"
-import { clearLiveSession, getLiveSession, getRoom, getUserPresentations } from "../services/rooms"
+import { clearLiveSession, getLiveSession, getRoom, getUserPresentations, setLiveSession } from "../services/rooms"
 import { useSession } from "../context/SessionContext"
 import type { ApiError } from "../services/http"
-import type { ApiSlideState, CanvasStroke, Role } from "../types"
+import type { ApiSlideState, CanvasStroke, Role, UserPresentation } from "../types"
 
-type LocationState = { role?: Role; presentationId?: string }
+type LocationState = { role?: Role; presentationId?: string; order?: string[] }
 
 // La API de orientación no está en todos los navegadores (iOS Safari no la expone). Se usa
 // con guardas y, si falla, la presentación sigue funcionando igual.
@@ -46,6 +46,15 @@ export default function LivePage() {
   const navigate = useNavigate()
   const { session } = useSession()
   const state = (useLocation().state as LocationState | null) ?? {}
+  // Orden individual que configuró el anfitrión. Viaja en la navegación y se recupera si recargó.
+  const order = state.order ?? (() => {
+    try {
+      const raw = sessionStorage.getItem(`spd.order.${id}`)
+      return raw ? (JSON.parse(raw) as string[]) : []
+    } catch {
+      return []
+    }
+  })()
 
   // El anfitrión es el dueño de la sala (owner_id en el back); el rol de la navegación solo
   // vale mientras llega la respuesta de la sala.
@@ -69,6 +78,7 @@ export default function LivePage() {
   // En formato individual, la presentación en vivo pertenece a un participante: es quien debe
   // poder avanzar diapositivas y dibujar, además del anfitrión.
   const [presenterId, setPresenterId] = useState<number | undefined>()
+  const [roomPresentations, setRoomPresentations] = useState<UserPresentation[]>([])
 
   const [sessionState, setSessionState] = useState<ApiSlideState | null>(null)
   const [connection, setConnection] = useState<"connecting" | "live" | "ended" | "error">("connecting")
@@ -177,15 +187,29 @@ export default function LivePage() {
     let active = true
     getUserPresentations(id)
       .then((list) => {
-        if (active) setPresenterId(list.find((p) => p.presentationId === presentationId)?.userId)
+        if (!active) return
+        setRoomPresentations(list)
+        setPresenterId(list.find((p) => p.presentationId === presentationId)?.userId)
       })
-      .catch(() => active && setPresenterId(undefined))
+      .catch(() => {
+        if (active) {
+          setRoomPresentations([])
+          setPresenterId(undefined)
+        }
+      })
     return () => {
       active = false
     }
   }, [id, presentationId])
 
   const canControl = isHost || (session?.userId !== undefined && presenterId === session.userId)
+
+  // Con orden individual, "Finalizar" pasa al siguiente expositor. Sin siguiente, termina todo.
+  const currentTurn = order.findIndex((key) => Number(key) === presenterId)
+  const nextUserId = currentTurn >= 0 ? Number(order[currentTurn + 1]) : NaN
+  const nextPresentation = Number.isNaN(nextUserId)
+    ? undefined
+    : roomPresentations.find((p) => p.userId === nextUserId)
 
   // La sesión en vivo es un WebSocket: el servidor manda el estado vigente apenas entra un
   // visor y re-manda en cada cambio del presentador.
@@ -263,11 +287,20 @@ export default function LivePage() {
   // su próxima consulta) y vuelve a la sala. Idempotente: finalizar dos veces no es un error.
   const finish = async () => {
     if (!isHost) return leave()
+    setError("")
     try {
+      if (nextPresentation) {
+        // Sigue la sesión, pero con la presentación del siguiente del orden.
+        const next = await setLiveSession(id, nextPresentation.presentationId)
+        setPresentationId(next.presentationId)
+        return
+      }
+      // No queda nadie más: se termina la sesión y todos vuelven a la sala.
+      sessionStorage.removeItem(`spd.order.${id}`)
       await clearLiveSession(id)
       leave()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo finalizar la presentación.")
+      setError(err instanceof Error ? err.message : "No se pudo cambiar de expositor.")
     }
   }
 
@@ -310,11 +343,17 @@ export default function LivePage() {
           </span>
           <span className="shrink-0 text-xs text-ink/70 sm:hidden">
             {sessionState.slide}/{sessionState.slide_count}
+            {order.length > 0 && currentTurn >= 0 && (
+              <span className="ml-1 text-ink/60">· T{currentTurn + 1}/{order.length}</span>
+            )}
           </span>
         </div>
         <div className="flex items-center gap-2">
           <span className="hidden items-center gap-2 text-sm text-ink/70 sm:inline-flex">
             <Icon name="eye" size={16} /> Diapositiva {sessionState.slide} de {sessionState.slide_count}
+            {order.length > 0 && currentTurn >= 0 && (
+              <span className="ml-2 text-ink/60">· Turno {currentTurn + 1} de {order.length}</span>
+            )}
           </span>
           <div className="flex items-center gap-1.5 sm:hidden">
             <button type="button" onClick={toggleFullscreen}
@@ -327,7 +366,8 @@ export default function LivePage() {
               <Icon name="logout" />
             </button>
             {isHost && (
-              <button type="button" onClick={finish} aria-label="Finalizar presentación"
+              <button type="button" onClick={finish}
+                aria-label={nextPresentation ? "Siguiente expositor" : "Finalizar presentación"}
                 className="flex h-10 w-10 items-center justify-center rounded-md bg-brand-700 text-white">
                 <Icon name="check" />
               </button>
@@ -390,7 +430,9 @@ export default function LivePage() {
         </Button>
         <Button variant="secondary" icon="logout" onClick={leave}>Abandonar</Button>
         {isHost && (
-          <Button icon="check" onClick={finish}>Finalizar presentación</Button>
+          <Button icon="check" onClick={finish}>
+            {nextPresentation ? "Siguiente expositor" : "Finalizar presentación"}
+          </Button>
         )}
       </div>
     </div>
