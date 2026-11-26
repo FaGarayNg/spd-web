@@ -8,22 +8,22 @@ import (
 // Errores del dominio. El handler HTTP los traduce a códigos de estado; Store también los usa.
 var (
 	// ErrInvalid indica datos de entrada inválidos; el mensaje dice cuál y por qué.
-	ErrInvalid = errors.New("datos inválidos")
+	ErrInvalid = errors.New("Datos inválidos")
 
-	ErrUserNotFound             = errors.New("usuario no encontrado")
-	ErrRoomNotFound             = errors.New("sala no encontrada")
-	ErrGroupNotFound            = errors.New("grupo no encontrado")
-	ErrPresentationNotFound     = errors.New("presentación no encontrada en el grupo")
-	ErrUserPresentationNotFound = errors.New("el usuario no tiene una presentación propia en la sala")
-	ErrNotRoomMember            = errors.New("el usuario no es miembro de la sala")
-	ErrNotGroupMember           = errors.New("el usuario no es integrante del grupo")
-	ErrLiveSessionNotFound      = errors.New("la sala no tiene una presentación en vivo")
+	ErrUserNotFound             = errors.New("Usuario no encontrado")
+	ErrRoomNotFound             = errors.New("Sala no encontrada")
+	ErrGroupNotFound            = errors.New("Grupo no encontrado")
+	ErrPresentationNotFound     = errors.New("Presentación no encontrada en el grupo")
+	ErrUserPresentationNotFound = errors.New("El usuario no tiene una presentación propia en la sala")
+	ErrNotRoomMember            = errors.New("El usuario no es miembro de la sala")
+	ErrNotGroupMember           = errors.New("El usuario no es integrante del grupo")
+	ErrLiveSessionNotFound      = errors.New("La sala no tiene una presentación en vivo")
 
 	// Autorización: la identidad llega en la cabecera Authorization (un JWT que valida el
 	// propio servicio; el gateway solo la reenvía). Sin sesión es 401; con sesión pero sin
 	// permiso sobre la sala es 403.
-	ErrUnauthenticated = errors.New("hay que iniciar sesión para hacer eso")
-	ErrForbidden       = errors.New("solo el anfitrión de la sala puede hacer eso")
+	ErrUnauthenticated = errors.New("Hay que iniciar sesión para hacer eso")
+	ErrForbidden       = errors.New("Solo el anfitrión de la sala puede hacer eso")
 
 	// Login: el mismo mensaje para correo inexistente y contraseña incorrecta, para no
 	// revelar qué cuentas existen.
