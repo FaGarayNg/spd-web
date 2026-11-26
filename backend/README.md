@@ -34,12 +34,11 @@ Cuatro microservicios, cada uno dueño de un dominio y desplegable por separado:
 | `realtime`      | Sesiones en vivo: diapositiva actual, visores WebSocket, control  | 8082   |
 | `rooms`         | Login (JWT), usuarios, salas, miembros, grupos, presentaciones y sesión en vivo (PostgreSQL) | 8083 |
 
-Los servicios no comparten disco, memoria ni base de datos: `realtime` y `rooms` solo conocen
-las presentaciones consultando la API de `presentations`, y solo `rooms` usa PostgreSQL.
+Los servicios no comparten disco, memoria ni base de datos: `realtime` y `rooms` solo conocen las presentaciones consultando la API de `presentations`, y solo `rooms` usa PostgreSQL.
 
 ```
 backend/
-├── internal/platform/          infraestructura común: config (entorno y .env), logs, servidor  Gin, apagado
+├── internal/platform/          infraestructura común: config, logs, servidor  Gin, apagado
 └── services/
     ├── gateway/                main.go + internal/gateway (proxy inverso, CORS)
     ├── presentations/          main.go + internal/
@@ -59,8 +58,7 @@ backend/
         └── dbtest/             esquema PostgreSQL aislado para los tests de integración
 ```
 
-Cada servicio guarda su código en su propio `internal/`. El compilador de Go impide que un
-servicio importe el código interno de otro, así que la frontera entre dominios no se puede
+Cada servicio guarda su código en su propio `internal/`. El compilador de Go impide que un servicio importe el código interno de otro, así que la frontera entre dominios no se puede
 saltar por accidente.
 
 ## Puesta en marcha
@@ -130,24 +128,15 @@ curl -F file=@informe.pdf http://localhost:8080/api/presentations/upload
 | 422    | No se pudo convertir: documento dañado o cifrado, o se superó `CONVERT_TIMEOUT`    |
 | 503    | El servidor no tiene pdftoppm o, para un `.pptx`, LibreOffice                      |
 
-Cada diapositiva del PPTX, o cada página del PDF, se renderiza como PNG con el lado mayor de
-`RENDER_MAX_PX` píxeles y se guarda como `001.png`, `002.png`… en el orden del documento. Un
-PPTX pasa por LibreOffice (PPTX → PDF) y después por pdftoppm (PDF → PNG); un PDF va directo
-a pdftoppm.
+Cada diapositiva del PPTX, o cada página del PDF, se renderiza como PNG con el lado mayor de `RENDER_MAX_PX` píxeles y se guarda como `001.png`, `002.png`… en el orden del documento. Un PPTX pasa por LibreOffice (PPTX → PDF) y después por pdftoppm (PDF → PNG); un PDF va directo a pdftoppm.
 
 ### `GET /api/presentations/:id`
 
-Metadatos y lista de diapositivas de una presentación, con el mismo formato que la respuesta
-de subida. Sirve para precargar todas las imágenes.
+Metadatos y lista de diapositivas de una presentación, con el mismo formato que la respuesta de subida. Sirve para precargar todas las imágenes.
 
 ### `GET /api/presentations/:id/slides/:slide_id`
 
-Devuelve la imagen. `slide_id` es el número de diapositiva, empezando en 1, o el nombre del
-archivo (`003.png`). Las presentaciones son inmutables, así que la respuesta se puede cachear
-indefinidamente (`Cache-Control: immutable`). Los endpoints **privados** de preview (`/preview` y
-`/my-presentation/slides/:slide_id`, y los equivalentes de grupo) responden `no-store`: una
-presentación puede reemplazarse y las URLs individuales no cambian, así que un caché del
-navegador podría mostrar las imágenes anteriores.
+Devuelve la imagen. `slide_id` es el número de diapositiva, empezando en 1, o el nombre del archivo (`003.png`). Las presentaciones son inmutables, así que la respuesta se puede cachear indefinidamente (`Cache-Control: immutable`). Los endpoints **privados** de preview (`/preview` y `/my-presentation/slides/:slide_id`, y los equivalentes de grupo) responden `no-store`: una presentación puede reemplazarse y las URLs individuales no cambian, así que un caché del navegador podría mostrar las imágenes anteriores.
 
 ### `POST /api/presentations/:id/control`
 
@@ -172,9 +161,7 @@ presentación no existe y 413 si el cuerpo supera 1 KB.
 ### `POST /api/presentations/:id/reset`
 
 Deja la sesión como nueva: diapositiva 1 y sin anotaciones, y lo difunde a los visores conectados.
-El front lo llama justo después de publicar una presentación, porque `realtime` conserva la sesión
-en memoria entre emisiones: sin este reset, volver a iniciar la misma presentación recuperaría el
-dibujo anterior. Responde 200 con el mismo `SlideState` del WebSocket.
+El front lo llama justo después de publicar una presentación, porque `realtime` conserva la sesión en memoria entre emisiones: sin este reset, volver a iniciar la misma presentación recuperaría el dibujo anterior. Responde 200 con el mismo `SlideState` del WebSocket.
 
 ### `GET /ws/presentation/:id` (WebSocket)
 
@@ -189,8 +176,7 @@ por cada cambio:
  ]}
 ```
 
-Cada mensaje es el estado completo (diapositiva **y anotaciones**). Un visor lento puede saltarse
-estados intermedios, pero siempre recibe el último y nunca los recibe desordenados.
+Cada mensaje es el estado completo (diapositiva **y anotaciones**). Un visor lento puede saltarse estados intermedios, pero siempre recibe el último y nunca los recibe desordenados.
 
 Quien presenta puede mandar trazos por el mismo WebSocket (los visores solo leen):
 
@@ -201,8 +187,7 @@ Quien presenta puede mandar trazos por el mismo WebSocket (los visores solo leen
 
 Cada envío reemplaza el trazo con ese `id` (el frontend manda el trazo completo hasta ese punto).
 `{"type": "clear"}` borra las anotaciones y cambiar de diapositiva también las limpia. Hay topes
-(200 trazos, 2000 puntos por trazo, 16 KiB por mensaje) y los mensajes inválidos se ignoran sin
-cortar la conexión.
+(200 trazos, 2000 puntos por trazo, 16 KiB por mensaje) y los mensajes inválidos se ignoran sin cortar la conexión.
 
 Códigos de cierre que el frontend puede leer en `event.code`:
 
@@ -215,13 +200,9 @@ Códigos de cierre que el frontend puede leer en `event.code`:
 
 ### Autenticación y permisos (servicio `rooms`)
 
-`POST /api/auth/login` intercambia correo y contraseña por un JWT HS256 con el id del usuario
-(`sub`) y 24 h de validez (`platform.TokenTTL`). El cliente lo manda como
-`Authorization: Bearer <token>`; el gateway solo reenvía la cabecera y quien la consume verifica
-la firma con `JWT_SECRET` (secreto compartido por los servicios que firman o verifican sesiones).
-Sin cabecera la petición es anónima: alcanza para consultar datos públicos y, a nivel de API, para
-unirse con un `user_id` y la clave (el front no lo hace: exige sesión iniciada). Con un token
-inválido o vencido responde 401.
+`POST /api/auth/login` intercambia correo y contraseña por un JWT HS256 con el id del usuario (`sub`) y 24 h de validez (`platform.TokenTTL`). El cliente lo manda como
+`Authorization: Bearer <token>`; el gateway solo reenvía la cabecera y quien la consume verifica la firma con `JWT_SECRET` (secreto compartido por los servicios que firman o verifican sesiones).
+Sin cabecera la petición es anónima: alcanza para consultar datos públicos y, a nivel de API, para unirse con un `user_id` y la clave (el front no lo hace: exige sesión iniciada). Con un token inválido o vencido responde 401.
 
 ```sh
 curl -X POST -H 'Content-Type: application/json' \
@@ -245,13 +226,12 @@ La autorización dentro de una sala es por dueño/miembro:
 | Miembro de la sala | Asignar la presentación del propio grupo y cambiar sus diapositivas; en formato individual, cargar la propia y publicarla en vivo. El anfitrión queda fuera de ese listado |
 
 Una sala sin dueño (`owner_id: 0`, la creada antes de que existiera el login) no puede ser
-administrada por la API. Donde se exige sesión, su ausencia responde 401 y la falta de permiso
-403. El campo `roles` de los usuarios se guarda y se muestra, pero hoy no regula permisos.
+administrada por la API. Donde se exige sesión, su ausencia responde 401 y la falta de permiso. 403: El campo `roles` de los usuarios se guarda y se muestra, pero hoy no regula permisos.
 
 ### Usuarios, salas, grupos y presentaciones asignadas (servicio `rooms`)
 
 CRUD en JSON sobre PostgreSQL. Los `DELETE` son borrados lógicos (ver Decisiones de diseño):
-lo borrado deja de verse en la API, pero sigue en la base de datos.
+Lo borrado deja de verse en la API, pero sigue en la base de datos.
 
 | Ruta                                             | Métodos                  | Recurso                                                         |
 |--------------------------------------------------|--------------------------|-----------------------------------------------------------------|
@@ -282,45 +262,22 @@ lo borrado deja de verse en la API, pero sigue en la base de datos.
 `POST` responde 201 con el recurso y la cabecera `Location`; `GET`, `PATCH` y `PUT`, 200 con el
 recurso; `DELETE`, 204 sin cuerpo. `PATCH` cambia solo los campos enviados.
 
-`PATCH /api/rooms/:id/order` guarda el orden del sorteo en la sala (`{"kind":"groups"|"individual",
-"ids":[...]}`; lista vacía = orden natural). Lo escribe solo el anfitrión y `GET /api/rooms/:id`
-lo devuelve a todos, así los integrantes ven el mismo orden sin depender de lo que tenga cada
-navegador en memoria.
+`PATCH /api/rooms/:id/order` guarda el orden del sorteo en la sala (`{"kind":"groups"|"individual","ids":[...]}`; lista vacía = orden natural). Lo escribe solo el anfitrión y `GET /api/rooms/:id` lo devuelve a todos, así los integrantes ven el mismo orden sin depender de lo que tenga cada navegador en memoria.
 
 Quitar una presentación asignada (`DELETE /api/groups/:id/presentations/:presentation_id`) puede
 hacerlo el anfitrión o el **encargado** del grupo (su primer integrante), que es quien la cargó.
-Los demás integrantes reciben 403. Cuando el último integrante sale del grupo (o sale de la sala
-o se borra su usuario), `store` quita la presentación asignada **automáticamente** en la misma
-transacción: un grupo vacío no necesita que nadie intervenga.
+Los demás integrantes reciben 403. Cuando el último integrante sale del grupo (o sale de la sala o se borra su usuario), `store` quita la presentación asignada **automáticamente** en la misma transacción: un grupo vacío no necesita que nadie intervenga.
 
-`GET /api/rooms/:id/my-presentation/preview` y `GET /api/rooms/:id/my-presentation/slides/:slide_id`
-son el equivalente del formato individual y solo responden para el dueño de esa presentación;
-cualquier otro integrante recibe 404.
+`GET /api/rooms/:id/my-presentation/preview` y `GET /api/rooms/:id/my-presentation/slides/:slide_id` son el equivalente del formato individual y solo responden para el dueño de esa presentación; cualquier otro integrante recibe 404.
 
 El preview de las diapositivas de un grupo **no** usa el endpoint público de `presentations`:
-`GET /preview` y `GET /slides/:slide_id` pasan por `rooms`, que exige sesión y comprueba que el
-usuario integre ese grupo (401 sin sesión, 403 si no). El anfitrión no puede espiar un grupo del
-que no forma parte. Las imágenes de la presentación en vivo siguen siendo públicas: son las que
-ven todos los espectadores.
+`GET /preview` y `GET /slides/:slide_id` pasan por `rooms`, que exige sesión y comprueba que el usuario integre ese grupo (401 sin sesión, 403 si no). El anfitrión no puede espiar un grupo del que no forma parte. Las imágenes de la presentación en vivo siguen siendo públicas: son las que ven todos los espectadores.
 
 En formato individual, `POST /api/rooms/:id/my-presentation` asigna la propia con
-`{"presentation_id": "<uuid>", "slides": [1, 2]}` (`slides` opcional; sin él, todas). El usuario
-sale del JWT, no del cuerpo: nadie puede adjudicarse la de otro. Un usuario tiene a lo sumo una
-presentación activa por sala; volver a asignar **reemplaza** el UUID y las diapositivas de esa
-misma fila (estuviera activa o borrada), así que el preview no puede mostrar el archivo anterior.
-`GET /user-presentations`
-lista las de la sala (es público, como los integrantes) y `PUT /my-presentation/live` la publica
-su dueño. El anfitrión no aparece en ese listado y no puede cargar ni publicar por estos
-endpoints: arma la sala y define el orden; para exponer la suya usa "Presentación propia"
-(upload directo + `PUT /live-session`). Borrar la sala, el usuario o la pertenencia también borra
-estas presentaciones.
+`{"presentation_id": "<uuid>", "slides": [1, 2]}` (`slides` opcional; sin él, todas). El usuario sale del JWT, no del cuerpo: nadie puede adjudicarse la de otro. Un usuario tiene a lo sumo una presentación activa por sala; volver a asignar **reemplaza** el UUID y las diapositivas de esa misma fila (estuviera activa o borrada), así que el preview no puede mostrar el archivo anterior.
+`GET /user-presentations` lista las de la sala (es público, como los integrantes) y `PUT /my-presentation/live` la publica su dueño. El anfitrión no aparece en ese listado y no puede cargar ni publicar por estos endpoints: arma la sala y define el orden; para exponer la suya usa "Presentación propia" (upload directo + `PUT /live-session`). Borrar la sala, el usuario o la pertenencia también borra estas presentaciones.
 
-La sesión en vivo (`GET`/`PUT`/`DELETE /api/rooms/:id/live-session`) es el puntero que publica el
-anfitrión para que los espectadores sepan qué presentación entrar: `GET` es público y responde 404
-si no hay ninguna; `PUT` publica o reemplaza (`{"presentation_id": "<uuid>"}`) y `DELETE` la
-termina (idempotente, 204 aunque no hubiera sesión). Publicar o terminar exige ser el dueño de la
-sala, y la presentación debe existir en `presentations` (422 si no, 503 si no responde). No es la
-sesión del servicio `realtime`: esa vive en su memoria.
+La sesión en vivo (`GET`/`PUT`/`DELETE /api/rooms/:id/live-session`) es el puntero que publica el anfitrión para que los espectadores sepan qué presentación entrar: `GET` es público y responde 404 si no hay ninguna; `PUT` publica o reemplaza (`{"presentation_id": "<uuid>"}`) y `DELETE` la termina (idempotente, 204 aunque no hubiera sesión). Publicar o terminar exige ser el dueño de la sala, y la presentación debe existir en `presentations` (422 si no, 503 si no responde). No es la sesión del servicio `realtime`: esa vive en su memoria.
 
 ```sh
 curl -X POST -H 'Content-Type: application/json' \
@@ -350,9 +307,7 @@ curl -X POST -H 'Content-Type: application/json' \
 
 Los listados de miembros de una sala y de integrantes de un grupo muestran a cada usuario
 solo lo que necesitan ver los demás: sin su correo ni las fechas de su cuenta, que solo
-devuelven `/api/users` y `/api/users/:id`. `joined_at` es cuándo entró. Los integrantes de un
-grupo se listan por **fecha de ingreso** (no por id): el primero es el "Encargado", que conserva
-el puesto aunque después se sume alguien con id menor.
+devuelven `/api/users` y `/api/users/:id`. `joined_at` es cuándo entró. Los integrantes de un grupo se listan por **fecha de ingreso** (no por id): el primero es el "Encargado", que conserva el puesto aunque después se sume alguien con id menor.
 
 ```json
 [{"id": 1, "full_name": "Ana López", "roles": ["presentador"], "joined_at": "2026-10-09T12:00:00Z"}]
@@ -422,48 +377,28 @@ El defecto existe solo para desarrollo local: en producción hay que definir un 
 
 **Concurrencia en `realtime` (patrón Hub).** Todo el estado lo posee una única goroutine
 (`Hub.Run`). Los handlers le envían altas, bajas y comandos por canales, así que no hay
-memoria compartida ni locks. Cada visor tiene un buzón de capacidad 1 donde el último estado
-sustituye al anterior. El Hub deposita en él sin bloquearse nunca, de modo que un visor
-lento no frena a nadie. Por conexión hay dos goroutines: una única escritora, con plazo por
-mensaje y ping cada 30 s, y una lectora, que procesa los pong y el cierre. Las consultas de
-red al catálogo se hacen fuera del bucle del Hub.
+memoria compartida ni locks. Cada visor tiene un buzón de capacidad 1 donde el último estado sustituye al anterior. El Hub deposita en él sin bloquearse nunca, de modo que un visor lento no frena a nadie. Por conexión hay dos goroutines: una única escritora, con plazo por mensaje y ping cada 30 s, y una lectora, que procesa los pong y el cierre. Las consultas de red al catálogo se hacen fuera del bucle del Hub.
 
 **Seguridad de las subidas.** Solo se aceptan `.pptx` y `.pdf`, y el contenido se comprueba
 antes de llegar al conversor. Un PPTX debe ser un paquete OOXML real (con
-`ppt/presentation.xml`), con un número de partes acotado y un tamaño descomprimido declarado
-que no supere `MAX_EXTRACTED_MB`, lo que frena las zip bombs. Un PDF debe empezar por la firma
-`%PDF-`. El archivo se copia a disco en streaming, sin cargarlo en memoria, y la copia se corta
-al superar `MAX_UPLOAD_MB`. Las imágenes que genera el conversor se verifican por sus magic
-bytes antes de publicarse. Cada subida trabaja en `UPLOAD_DIR/.staging/<uuid>` y se publica con
-un `rename` atómico, así que nunca se ve una presentación a medias.
+`ppt/presentation.xml`), con un número de partes acotado y un tamaño descomprimido declarado que no supere `MAX_EXTRACTED_MB`, lo que frena las zip bombs. Un PDF debe empezar por la firma `%PDF-`. El archivo se copia a disco en streaming, sin cargarlo en memoria, y la copia se corta al superar `MAX_UPLOAD_MB`. Las imágenes que genera el conversor se verifican por sus magic bytes antes de publicarse. Cada subida trabaja en `UPLOAD_DIR/.staging/<uuid>` y se publica con un `rename` atómico, así que nunca se ve una presentación a medias.
 
 **Conversión.** Convertir un PPTX directamente a PNG con LibreOffice solo exporta la primera
 diapositiva. Por eso se convierte a PDF y se rasteriza cada página con `pdftoppm`. Un PDF
 subido se salta LibreOffice y va directo a `pdftoppm`: se convierte más rápido y no necesita
 LibreOffice instalado. Las conversiones simultáneas de ambos formatos están limitadas
-(`MAX_CONCURRENT_CONVERSIONS`), cada una usa un perfil de LibreOffice propio y se renderizan
-como mucho `MAX_SLIDES` + 1 páginas. Si se agota el tiempo, se mata el grupo de procesos
-completo, sin dejar `soffice.bin` huérfanos.
+(`MAX_CONCURRENT_CONVERSIONS`), cada una usa un perfil de LibreOffice propio y se renderizan como mucho `MAX_SLIDES` + 1 páginas. Si se agota el tiempo, se mata el grupo de procesos completo, sin dejar `soffice.bin` huérfanos.
 
 **Capas de `rooms`.** `domain` tiene las entidades, las reglas (validaciones, hash de secretos,
 clave de ingreso, diapositivas válidas) y los casos de uso, y no conoce GORM: declara las
-interfaces que necesita, `Store` y `Catalog`. `store` implementa `Store` con GORM y PostgreSQL,
-`catalog` implementa `Catalog` con la API de `presentations` y `api` traduce HTTP a casos de
-uso. `main.go` los conecta.
+interfaces que necesita, `Store` y `Catalog`. `store` implementa `Store` con GORM y PostgreSQL, `catalog` implementa `Catalog` con la API de `presentations` y `api` traduce HTTP a casos de uso. `main.go` los conecta.
 
 **Autenticación y autorización (`rooms`).** El login emite un JWT HS256 con el id del usuario y
-24 h de validez; no hay sesiones en servidor. `currentUser` lee la cabecera `Bearer`: sin ella la
-petición sigue anónima (consultas públicas), y con un token inválido responde 401. Las
-reglas de la sala viven en `domain/authz.go`: ser dueño (`owner_id`) habilita administrar la sala,
-sus grupos y la sesión en vivo; ser dueño o miembro habilita asignar la presentación del propio
-grupo o la propia (formato individual) y publicarla. El gateway reenvía la cabecera sin
-inspeccionarla, así que la confianza se decide en cada
-servicio que la usa. Los roles del usuario se guardan y se exponen, pero aún no intervienen en la
-autorización.
+24 h de validez; no hay sesiones en servidor. `currentUser` lee la cabecera `Bearer`: sin ella la petición sigue anónima (consultas públicas), y con un token inválido responde 401. Las
+reglas de la sala viven en `domain/authz.go`: ser dueño (`owner_id`) habilita administrar la sala, sus grupos y la sesión en vivo; ser dueño o miembro habilita asignar la presentación del propio grupo o la propia (formato individual) y publicarla. El gateway reenvía la cabecera sin inspeccionarla, así que la confianza se decide en cada servicio que la usa. Los roles del usuario se guardan y se exponen, pero aún no intervienen en la autorización.
 
 **Base de datos (`rooms`).** GORM sobre pgx, todo dentro de `store`. Al arrancar, `AutoMigrate`
-crea o actualiza las tablas, los índices y las claves foráneas. Los nombres del modelo pasan a
-inglés, como el resto del código:
+crea o actualiza las tablas, los índices y las claves foráneas. Los nombres del modelo pasan a inglés, como el resto del código:
 
 | Modelo         | Tabla           | Columnas                                                              |
 |----------------|-----------------|-----------------------------------------------------------------------|
@@ -476,16 +411,15 @@ inglés, como el resto del código:
 | Presentación propia | `user_presentations` | `id`, `room_id` (FK), `user_id` (FK), `presentation_id uuid`, `slides integer[]`; única por `(room_id, user_id)` |
 | Sesión en vivo | `live_sessions` | `room_id` (PK y FK), `presentation_id uuid`, `created_at` (= `started_at`) |
 
-Todas las tablas tienen `created_at` y `deleted_at` (y, salvo `room_members` y `group_members`,
-`updated_at`). `live_sessions` es la excepción: no tiene borrado lógico (terminar la sesión
+Todas las tablas tienen `created_at` y `deleted_at` (y, salvo `room_members` y `group_members`, `updated_at`). `live_sessions` es la excepción: no tiene borrado lógico (terminar la sesión
 borra la fila) ni `updated_at`.
 
 **Borrado lógico.** `DELETE` marca la fila con `deleted_at` y todas las consultas excluyen las
-filas marcadas. Como la fila sigue existiendo, las claves foráneas no propagan el borrado, así
-que:
+filas marcadas. Como la fila sigue existiendo, las claves foráneas no propagan el borrado, así que:
 
 - El servicio borra en cascada él mismo, en una transacción: sala → grupos (con sus
   presentaciones e integrantes) y miembros; grupo → presentaciones e integrantes; usuario →
+<<<<<<< HEAD
   pertenencias a salas y grupos. Quien sale de una sala sale también de sus grupos; si era encargado, el rol pasa automáticamente al
 siguiente integrante de cada grupo (o queda vacío si no queda nadie).
 - Cada alta bloquea a su padre con `SELECT … FOR SHARE` hasta terminar. Así, un alta concurrente
@@ -493,27 +427,24 @@ siguiente integrante de cada grupo (o queda vacío si no queda nadie).
 - El alta de un integrante bloquea el grupo con `FOR UPDATE`: las altas en un grupo pasan de a
   una, así dos no pueden ocupar a la vez la última plaza del cupo. También bloquea con
   `FOR SHARE` la pertenencia a la sala, así nadie queda en un grupo sin ser miembro de su sala.
+=======
+  pertenencias a salas y grupos. Quien sale de una sala sale también de sus grupos.
+- Cada alta bloquea a su padre con `SELECT … FOR SHARE` hasta terminar. Así, un alta concurrente no deja un hijo colgando de un padre recién borrado.
+- El alta de un integrante bloquea el grupo con `FOR UPDATE`: las altas en un grupo pasan de a una, así dos no pueden ocupar a la vez la última plaza del cupo. También bloquea con `FOR SHARE` la pertenencia a la sala, así nadie queda en un grupo sin ser miembro de su sala.
+>>>>>>> cb9a8c2 (Sintaxis corregida)
 - El correo es único solo entre los usuarios no borrados (índice único parcial
-  `WHERE deleted_at IS NULL`; el servicio lo guarda en minúsculas): borrar un usuario libera su
-  correo.
+  `WHERE deleted_at IS NULL`; el servicio lo guarda en minúsculas): borrar un usuario libera su correo.
 - `room_members`, `group_members` y `presentations` tienen clave natural, que no se puede
-  repetir: volver a una sala o a un grupo, o reasignar una presentación quitada, reactiva la misma
-  fila
-  (`INSERT … ON CONFLICT … DO UPDATE … WHERE deleted_at IS NOT NULL`).
+  repetir: volver a una sala o a un grupo, o reasignar una presentación quitada, reactiva la misma fila (`INSERT … ON CONFLICT … DO UPDATE … WHERE deleted_at IS NOT NULL`).
 
-**Secretos.** Contraseñas y claves de ingreso se guardan como hash bcrypt y nunca salen en las
-respuestas ni en los logs: GORM registra solo las consultas lentas o fallidas, y sin valores. Los
-JWT no se guardan: se firman con `JWT_SECRET`, que en producción debe reemplazar al valor de
-desarrollo.
+**Secretos.** Contraseñas y claves de ingreso se guardan como hash bcrypt y nunca salen en las respuestas ni en los logs: GORM registra solo las consultas lentas o fallidas, y sin valores. Los JWT no se guardan: se firman con `JWT_SECRET`, que en producción debe reemplazar al valor de desarrollo.
 
 **Presentaciones de `rooms`.** No hay clave foránea hacia `presentations`, porque está en otro
 servicio. Al asignar una presentación o cambiar sus diapositivas, `rooms` consulta a
 `presentations`: si no existe responde 422, y si las diapositivas no están en el rango
 `1..slide_count`, 400.
 
-**Apagado ordenado.** Ante SIGTERM, cada servicio deja de aceptar conexiones y espera a las
-peticiones en curso. `realtime` además envía a cada visor un cierre 1001. Si un visor no lo
-confirma en 3 s, cierra su conexión de forma forzada.
+**Apagado ordenado.** Ante SIGTERM, cada servicio deja de aceptar conexiones y espera a las peticiones en curso. `realtime` además envía a cada visor un cierre 1001. Si un visor no lo confirma en 3 s, cierra su conexión de forma forzada.
 
 ## Limitaciones conocidas
 
@@ -523,14 +454,10 @@ confirma en 3 s, cierra su conexión de forma forzada.
 - **`realtime` guarda el estado en memoria.** Debe ejecutarse una sola instancia, o enrutar
   cada presentación siempre a la misma instancia. Para escalar en horizontal haría falta un
   bus compartido (Redis Pub/Sub, NATS).
-- LibreOffice y pdftoppm procesan documentos no confiables. En producción conviene ejecutar
-  `presentations` en un contenedor aislado y sin salida a internet.
-- **No hay límite de intentos** de login ni de clave de ingreso (aunque las comparaciones con
-  bcrypt encarecen cada intento). Conviene agregar rate limiting y bloqueo de cuentas.
-- **La autorización es solo por dueño/miembro de la sala.** El campo `roles` de los usuarios se
-  guarda y se muestra, pero todavía no regula permisos.
+- LibreOffice y pdftoppm procesan documentos no confiables. En producción conviene ejecutar `presentations` en un contenedor aislado y sin salida a internet.
+- **No hay límite de intentos** de login ni de clave de ingreso (aunque las comparaciones con bcrypt encarecen cada intento). Conviene agregar rate limiting y bloqueo de cuentas.
+- **La autorización es solo por dueño/miembro de la sala.** El campo `roles` de los usuarios se guarda y se muestra, pero todavía no regula permisos.
 - **`JWT_SECRET` tiene un valor fijo para desarrollo.** Hay que definirlo en cada despliegue; si
   otro servicio pasa a verificar sesiones, debe compartir exactamente el mismo secreto.
 - Los listados de `rooms` no están paginados.
-- `AutoMigrate` solo añade tablas, columnas e índices. Para renombrar o borrar columnas hacen
-  falta migraciones versionadas (p. ej. goose o golang-migrate).
+- `AutoMigrate` solo añade tablas, columnas e índices. Para renombrar o borrar columnas hacen falta migraciones versionadas (p. ej. goose o golang-migrate).
