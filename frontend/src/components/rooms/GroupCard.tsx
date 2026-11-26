@@ -1,7 +1,9 @@
 import { useRef, useState, type ChangeEvent } from "react"
+import { MAX_UPLOAD_MB } from "../../services/live"
 import type { ApiPresentation, Group } from "../../types"
 import { initials } from "../../utils/initials"
 import { Button } from "../ui/Button"
+import { Icon } from "../ui/Icon"
 
 type Props = {
   group: Group
@@ -42,12 +44,11 @@ export function GroupCard({
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState("")
-  // Integrante de la sesión: lo marca la carga de datos (user_id de la sesión dentro del grupo).
   const joined = group.members.some((member) => member.joined)
-  // El encargado es quien aparece primero en el grupo; solo él carga la presentación.
   const isEncargado = group.members[0]?.id === currentUserId
   const full = !joined && group.members.length >= group.limit
   const assigned = presentation != null
+  const freeSlots = Math.max(0, group.limit - group.members.length)
 
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -72,40 +73,74 @@ export function GroupCard({
   }
 
   return (
-    <article className={`flex flex-col gap-4 rounded-lg border bg-surface p-4 sm:p-5 ${joined ? "border-brand-700" : "border-border"}`}>
-      <div className="flex items-baseline justify-between">
-        <strong className="text-brand-700">Grupo {String(group.priority).padStart(2, "0")}</strong>
-        <small className="text-ink/60">{group.members.length}/{group.limit}</small>
+    <article className={`flex h-full flex-col gap-4 rounded-xl border bg-surface p-5 ${
+      joined ? "border-border bg-brand-50/40 ring-1 ring-brand-100" : "border-border"
+    }`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <strong className="text-base font-semibold text-brand-700">
+            Grupo {String(group.priority).padStart(2, "0")}
+          </strong>
+          {joined && (
+            <span className="w-fit rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700">
+              Tu equipo
+            </span>
+          )}
+        </div>
+        <span className="shrink-0 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-ink/70">
+          {group.members.length}/{group.limit} cupos
+        </span>
       </div>
-      <div className="flex min-h-16 flex-col gap-2">
-        {group.members.length ? (
+
+      <div className="flex flex-col gap-2">
+        {group.members.length > 0 ? (
           group.members.map((member, index) => (
-            <div key={member.id} className="flex items-center gap-2 text-sm">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
+            <div key={member.id} className="flex items-center gap-2 rounded-md px-1 py-1 text-sm">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
                 {initials(member.fullName)}
               </span>
-              <span>{member.fullName}</span>
-              {index === 0 && <small className="text-ink/60">· Encargado</small>}
+              <span className="min-w-0 flex-1 truncate">{member.fullName}</span>
+              {index === 0 && (
+                <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+                  Encargado
+                </span>
+              )}
             </div>
           ))
         ) : (
           <p className="text-sm text-ink/60">Todavía no hay integrantes</p>
         )}
+        {Array.from({ length: freeSlots }, (_, index) => (
+          <div key={`cupo-${index}`}
+            className="flex items-center gap-2 rounded-md border border-dashed border-border px-1 py-1 text-sm text-ink/40">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs">·</span>
+            <span>Cupo disponible</span>
+          </div>
+        ))}
       </div>
 
       {assigned ? (
-        <div className="flex flex-col gap-2 rounded-lg bg-brand-50 p-3 text-sm text-brand-700">
+        <div className="flex flex-col gap-3 rounded-lg bg-brand-50/70 p-3 text-sm text-brand-700">
           <div className="flex items-center justify-between gap-2">
-            <strong>Presentación asignada</strong>
-            <small>{presentation.slides.length} diapositivas</small>
+            <strong className="font-semibold">Presentación asignada</strong>
+            <span className="rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold">
+              {presentation.slides.length} diapositivas
+            </span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {canPresent && onPresent && (
-              <Button variant="ghost" icon="play" onClick={onPresent}>Presentar</Button>
+          <div className="flex items-center gap-2">
+            {joined && (
+              <Button variant="secondary" icon="eye" onClick={onView} className="min-w-0 flex-1 justify-center">
+                Ver diapositivas
+              </Button>
             )}
-            {joined && <Button variant="ghost" icon="eye" onClick={onView}>Ver diapositivas</Button>}
+            {canPresent && onPresent && (
+              <Button variant="secondary" icon="play" onClick={onPresent} className="shrink-0">Presentar</Button>
+            )}
             {(canManage || isEncargado) && (
-              <Button variant="ghost" icon="trash" onClick={handleUnassign}>Quitar</Button>
+              <button type="button" onClick={handleUnassign} title="Quitar" aria-label="Quitar"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-ink/60 transition-colors hover:bg-red-50 hover:text-red-700">
+                <Icon name="trash" size={18} />
+              </button>
             )}
           </div>
         </div>
@@ -114,10 +149,11 @@ export function GroupCard({
           <>
             <input ref={inputRef} type="file" accept=".pdf,.pptx" className="hidden"
               onChange={handleFile} disabled={uploading} />
-            <Button variant="ghost" icon="upload" className="self-start"
+            <Button variant="secondary" icon="upload" className="w-full justify-center"
               onClick={() => inputRef.current?.click()} disabled={uploading}>
               {uploading ? "Subiendo y convirtiendo…" : "Cargar presentación"}
             </Button>
+            <small className="text-ink/60">PDF o PPTX · máximo {MAX_UPLOAD_MB} MB</small>
           </>
         )
       )}
@@ -128,10 +164,19 @@ export function GroupCard({
         <p className="text-sm text-ink/60">Convirtiendo el archivo en diapositivas…</p>
       )}
       {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
-      <div className="flex flex-wrap gap-2">
-        <Button variant={joined ? "ghost" : "secondary"} onClick={onToggle} disabled={full || blocked}>
-          {joined ? "Abandonar" : blocked ? "Ya estás en otro grupo" : full ? "Completo" : "Unirme"}
-        </Button>
+
+      <div className="mt-auto flex border-t border-border pt-4">
+        {joined ? (
+          <Button variant="secondary" onClick={onToggle} className="w-full justify-center">Abandonar</Button>
+        ) : blocked ? (
+          <div className="w-full rounded-md bg-surface-muted px-3 py-2 text-center text-sm text-ink/60">
+            Ya estás en otro grupo
+          </div>
+        ) : full ? (
+          <div className="w-full rounded-md bg-surface-muted px-3 py-2 text-center text-sm text-ink/60">Completo</div>
+        ) : (
+          <Button variant="secondary" onClick={onToggle} className="w-full justify-center">Unirme</Button>
+        )}
       </div>
     </article>
   )

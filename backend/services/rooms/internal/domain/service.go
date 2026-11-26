@@ -126,6 +126,7 @@ type UserUpdate struct {
 type RoomUpdate struct {
 	Name            *string
 	URL             *string
+	AccessKey       *string
 	AccessKeyHash   *string
 	Format          *string
 	IndividualOrder *[]int32

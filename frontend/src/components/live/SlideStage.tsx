@@ -79,12 +79,8 @@ export function SlideStage({
   // el presentador de turno deben verse entre sí. Si hay un trazo local en curso se dibuja
   // encima después del repintado para que no se pierda mientras se está dibujando.
   useEffect(() => {
-    const c = ctx()
-    if (!c) return
-    clearCanvas()
-    annotations.forEach((stroke) => drawStroke(c, stroke))
-    if (current.current) drawStroke(c, current.current)
-  }, [annotations, url])
+    repaint()
+  }, [annotations, url, canvasBox])
 
   // El canvas tiene que cubrir exactamente la imagen (object-contain), no todo el stage:
   // en vertical el contenedor es más alto que la diapositiva y los trazos quedarían
@@ -112,7 +108,7 @@ export function SlideStage({
     const observer = new ResizeObserver(fit)
     observer.observe(stage)
     return () => observer.disconnect()
-  }, [url, imageSize.width, imageSize.height])
+  }, [url, imageSize.width, imageSize.height, fill])
 
   // Pre-carga de la siguiente diapositiva: las imágenes son cacheables (immutable), así que el
   // fetch posterior sale del caché y el cambio es instantáneo.
@@ -123,32 +119,65 @@ export function SlideStage({
     }
   }, [url, slide, total])
 
+  // Transforma coordenadas del canvas (1280x720) al rectángulo donde se ve la imagen dentro
+  // del escenario. Así el dibujo sigue alineado aunque el canvas cubra todo el contenedor.
+  const applyImageBox = (c: CanvasRenderingContext2D) => {
+    const box = canvasBox
+    const stage = stageRef.current
+    if (!box || !stage) return false
+    const stageWidth = stage.clientWidth || 1
+    const stageHeight = stage.clientHeight || 1
+    c.translate(box.left * W / stageWidth, box.top * H / stageHeight)
+    c.scale(box.width / stageWidth, box.height / stageHeight)
+    return true
+  }
+
+  const paintStroke = (c: CanvasRenderingContext2D, stroke: CanvasStroke) => {
+    c.save()
+    if (applyImageBox(c)) drawStroke(c, stroke)
+    c.restore()
+  }
+
+  const repaint = (extra?: CanvasStroke) => {
+    const c = ctx()
+    if (!c) return
+    c.clearRect(0, 0, W, H)
+    annotations.forEach((stroke) => paintStroke(c, stroke))
+    const stroke = extra ?? current.current
+    if (stroke) paintStroke(c, stroke)
+  }
+
   const point = (e: PointerEvent<HTMLCanvasElement>): CanvasPoint => {
     const r = e.currentTarget.getBoundingClientRect()
-    return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) }
+    const box = canvasBox
+    const left = box?.left ?? 0
+    const top = box?.top ?? 0
+    const width = box?.width || r.width || 1
+    const height = box?.height || r.height || 1
+    return {
+      x: Math.min(W, Math.max(0, (e.clientX - r.left - left) * (W / width))),
+      y: Math.min(H, Math.max(0, (e.clientY - r.top - top) * (H / height))),
+    }
   }
 
   const start = (e: PointerEvent<HTMLCanvasElement>) => {
-    const c = ctx()
-    if (!canControl || !c) return
+    if (!canControl || !ctx()) return
     drawing.current = true
     e.currentTarget.setPointerCapture(e.pointerId)
     const stroke: CanvasStroke = {
       id: crypto.randomUUID(), color, width: eraser ? 28 : 5, eraser, points: [point(e)],
     }
     current.current = stroke
-    drawStroke(c, stroke)
+    repaint(stroke)
     onAnnotation(stroke)
   }
 
   const move = (e: PointerEvent<HTMLCanvasElement>) => {
     if (!drawing.current || !current.current) return
-    const c = ctx()
-    if (!c) return
     const stroke = current.current
     stroke.points.push(point(e))
     // Se repinta el trazo completo para que el local coincida con el estado compartido.
-    drawStroke(c, stroke)
+    repaint(stroke)
     const now = Date.now()
     if (now - lastSent.current >= 50) {
       onAnnotation({ ...stroke, points: [...stroke.points] })
@@ -202,8 +231,7 @@ export function SlideStage({
           <div className="flex h-full items-center justify-center text-ink/60">Cargando diapositiva…</div>
         )}
         <canvas ref={canvasRef} width={W} height={H}
-          style={canvasBox ?? { visibility: "hidden" }}
-          className={`absolute touch-none ${canControl ? "cursor-crosshair" : "pointer-events-none"}`}
+          className={`absolute inset-0 h-full w-full touch-none ${canControl ? "cursor-crosshair" : "pointer-events-none"}`}
           onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
       </div>
       {canControl && (

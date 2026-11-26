@@ -118,9 +118,12 @@ export function apiUpload<T>(path: string, form: FormData): Promise<T> {
  * normal no podría mandar el Bearer, por eso el preview privado usa este helper. */
 export async function apiImage(path: string): Promise<string> {
   const token = getToken()
+  // Las URLs del preview ya vienen con /api (como las del servicio presentations): no lo
+  // agregamos dos veces, si no el gateway no encuentra la ruta.
+  const fullPath = path.startsWith(`${API_BASE}/`) ? path : `${API_BASE}${path}`
   let response: Response
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    response = await fetch(fullPath, {
       headers: token !== null ? { Authorization: `Bearer ${token}` } : {},
     })
   } catch {

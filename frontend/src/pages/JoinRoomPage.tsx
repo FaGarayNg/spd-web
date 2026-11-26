@@ -6,7 +6,6 @@ import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
 import { ApiError } from "../services/http"
 import { getRoom, joinRoom } from "../services/rooms"
-import { saveRoomKey } from "../utils/accessKey"
 import { loginPath } from "../utils/redirect"
 import type { Room } from "../types"
 
@@ -52,8 +51,6 @@ export default function JoinRoomPage() {
       // POST /api/rooms/:id/members valida la clave (403 = incorrecta) y deja al usuario como
       // miembro real: 201 si entra ahora, 200 si ya pertenecía.
       await joinRoom(room.id, { userId: session.userId, accessKey: key || undefined })
-      // El dispositivo recuerda la clave para poder mostrarla y copiarla en la sala.
-      if (key) saveRoomKey(room.id, key)
       navigate(`/salas/${room.id}`)
     } catch (err) {
       if (err instanceof ApiError) {

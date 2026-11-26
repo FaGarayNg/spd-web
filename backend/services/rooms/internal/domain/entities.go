@@ -36,9 +36,12 @@ type Room struct {
 	// integrantes vean el mismo orden, tanto en formato individual como en grupos.
 	IndividualOrder []int32   `json:"individual_order"`
 	GroupOrder      []int32   `json:"group_order"`
-	AccessKeyHash   string    `json:"-"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// AccessKey se guarda en el servidor para que el anfitrión pueda verla desde cualquier
+	// dispositivo. Nunca se serializa: la API decide si la devuelve (solo al dueño).
+	AccessKey     string    `json:"-"`
+	AccessKeyHash string    `json:"-"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // Formatos de presentación confirmables en una sala.

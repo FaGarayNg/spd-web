@@ -37,6 +37,8 @@ type room struct {
 	gorm.Model
 	Name          string `gorm:"size:200;not null"`
 	URL           string `gorm:"size:2048;not null;default:''"`
+	// Clave en claro para que el anfitrión pueda recuperarla desde cualquier dispositivo.
+	AccessKey     string `gorm:"size:72;not null;default:''"`
 	AccessKeyHash string `gorm:"not null;default:''"`
 	// Dueño y anfitrión de la sala; nil en las salas de antes del login.
 	OwnerID *uint `gorm:"index"`
@@ -56,7 +58,8 @@ func (r room) toDomain() domain.Room {
 	}
 	return domain.Room{ID: r.ID, Name: r.Name, URL: r.URL, OwnerID: ownerID, Format: r.Format,
 		IndividualOrder: nonNil(r.IndividualOrder), GroupOrder: nonNil(r.GroupOrder),
-		AccessKeyHash: r.AccessKeyHash, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		AccessKey: r.AccessKey, AccessKeyHash: r.AccessKeyHash,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 }
 
 // roomMember es un DetalleSala. La clave primaria es el par (user_id, room_id): quien vuelve a

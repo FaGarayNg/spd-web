@@ -1,33 +1,41 @@
 import { useEffect, useRef, useState } from "react"
 import { apiImage } from "../../services/http"
-import { getGroupPreview } from "../../services/rooms"
+import { getGroupPreview, getMyPreview } from "../../services/rooms"
 import type { ApiPresentationDetail } from "../../types"
 import { Button } from "../ui/Button"
 import { Icon } from "../ui/Icon"
 
+export type PreviewSource =
+  | { kind: "group"; groupId: number; presentationId: string; nonce: number }
+  | { kind: "individual"; roomId: number; presentationId: string; nonce: number }
+
 type Props = {
-  groupId: number
-  presentationId: string
-  /** Rótulo (p. ej. "Grupo 03") para saber de quién es la presentación. */
+  /** De dónde viene el preview: un grupo o la presentación propia del usuario. */
+  source: PreviewSource
+  /** Rótulo (p. ej. "Grupo 03" o "Mi presentación"). */
   label: string
   onClose: () => void
 }
 
-/** Galería privada: solo integrantes del grupo pueden abrirla. Metadatos e imágenes pasan por
- * rooms, que verifica la pertenencia; las imágenes se bajan con la sesión y se muestran como URLs
- * locales porque un <img> común no puede enviar la cabecera de autorización. */
-export function SlideGallery({ groupId, presentationId, label, onClose }: Props) {
+/** Galería privada: la abre un integrante del grupo o el dueño de una presentación individual.
+ * Metadatos e imágenes pasan por rooms, que valida el permiso; las imágenes se bajan con la
+ * sesión y se muestran como URLs locales porque un <img> común no manda la autorización. */
+export function SlideGallery({ source, label, onClose }: Props) {
   const [detail, setDetail] = useState<ApiPresentationDetail | undefined>(undefined)
   const [images, setImages] = useState<Record<number, string>>({})
   const [error, setError] = useState("")
   const created = useRef<string[]>([])
+  const sourceKey = JSON.stringify(source)
 
   useEffect(() => {
     let active = true
     setDetail(undefined)
     setImages({})
     setError("")
-    getGroupPreview(groupId, presentationId)
+    const load = source.kind === "group"
+      ? getGroupPreview(source.groupId, source.presentationId)
+      : getMyPreview(source.roomId)
+    load
       .then(async (result) => {
         if (!active) return
         setDetail(result)
@@ -46,7 +54,7 @@ export function SlideGallery({ groupId, presentationId, label, onClose }: Props)
       created.current.forEach((url) => URL.revokeObjectURL(url))
       created.current = []
     }
-  }, [groupId, presentationId])
+  }, [sourceKey])
 
   return (
     <div

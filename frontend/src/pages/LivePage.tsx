@@ -4,12 +4,18 @@ import { SlideStage } from "../components/live/SlideStage"
 import { Button } from "../components/ui/Button"
 import { Icon } from "../components/ui/Icon"
 import { controlPresentation, connectPresentationSocket, type ControlCommand, type LiveSocket } from "../services/live"
-import { clearLiveSession, getLiveSession, getRoom, getUserPresentations, setLiveSession } from "../services/rooms"
+import { clearLiveSession, getGroupPresentations, getLiveSession, getRoom, getUserPresentations, setLiveSession } from "../services/rooms"
 import { useSession } from "../context/SessionContext"
 import type { ApiError } from "../services/http"
-import type { ApiSlideState, CanvasStroke, Role, UserPresentation } from "../types"
+import type { ApiPresentation, ApiSlideState, CanvasStroke, Role, UserPresentation } from "../types"
 
-type LocationState = { role?: Role; presentationId?: string; order?: string[] }
+type LocationState = {
+  role?: Role
+  presentationId?: string
+  order?: string[]
+  kind?: "group" | "individual" | "own"
+  groupId?: number
+}
 
 // La API de orientación no está en todos los navegadores (iOS Safari no la expone). Se usa
 // con guardas y, si falla, la presentación sigue funcionando igual.
@@ -55,6 +61,11 @@ export default function LivePage() {
       return []
     }
   })()
+
+  const kind = state.kind ?? "individual"
+  const [currentGroupId, setCurrentGroupId] = useState(state.groupId)
+  const [groupPresentations, setGroupPresentations] = useState<(ApiPresentation | null)[]>([])
+  const isGroupMode = kind === "group" && currentGroupId !== undefined
 
   // El anfitrión es el dueño de la sala (owner_id en el back); el rol de la navegación solo
   // vale mientras llega la respuesta de la sala.
@@ -202,14 +213,41 @@ export default function LivePage() {
     }
   }, [id, presentationId])
 
+  // En grupos, las presentaciones por turno viven en cada grupo, no en las presentaciones propias.
+  useEffect(() => {
+    if (!isGroupMode || order.length === 0) return
+    let active = true
+    Promise.all(order.map((key) =>
+      getGroupPresentations(Number(key))
+        .then((list) => list[0] ?? null)
+        .catch(() => null),
+    )).then((list) => {
+      if (active) setGroupPresentations(list)
+    })
+    return () => {
+      active = false
+    }
+  }, [isGroupMode, order.join(",")])
+
   const canControl = isHost || (session?.userId !== undefined && presenterId === session.userId)
 
-  // Con orden individual, "Finalizar" pasa al siguiente expositor. Sin siguiente, termina todo.
-  const currentTurn = order.findIndex((key) => Number(key) === presenterId)
+  // "Siguiente exposición" pasa al siguiente del orden: en individual por usuario, en grupos por
+  // grupo. Si no hay siguiente, el botón termina la sesión completa.
+  const currentTurn = isGroupMode
+    ? order.findIndex((key) => Number(key) === currentGroupId)
+    : order.findIndex((key) => Number(key) === presenterId)
+  const nextGroupIndex = isGroupMode
+    ? groupPresentations.findIndex((p, index) => index > currentTurn && p !== null)
+    : -1
+  const nextGroupId = nextGroupIndex >= 0 ? Number(order[nextGroupIndex]) : NaN
   const nextUserId = currentTurn >= 0 ? Number(order[currentTurn + 1]) : NaN
+  const nextGroupPresentation = nextGroupIndex >= 0 ? groupPresentations[nextGroupIndex] : undefined
   const nextPresentation = Number.isNaN(nextUserId)
     ? undefined
     : roomPresentations.find((p) => p.userId === nextUserId)
+  const nextPresentationId = isGroupMode
+    ? nextGroupPresentation?.presentation_id
+    : nextPresentation?.presentationId
 
   // La sesión en vivo es un WebSocket: el servidor manda el estado vigente apenas entra un
   // visor y re-manda en cada cambio del presentador.
@@ -289,9 +327,10 @@ export default function LivePage() {
     if (!isHost) return leave()
     setError("")
     try {
-      if (nextPresentation) {
+      if (nextPresentationId) {
         // Sigue la sesión, pero con la presentación del siguiente del orden.
-        const next = await setLiveSession(id, nextPresentation.presentationId)
+        const next = await setLiveSession(id, nextPresentationId)
+        if (isGroupMode && !Number.isNaN(nextGroupId)) setCurrentGroupId(nextGroupId)
         setPresentationId(next.presentationId)
         return
       }
@@ -367,7 +406,7 @@ export default function LivePage() {
             </button>
             {isHost && (
               <button type="button" onClick={finish}
-                aria-label={nextPresentation ? "Siguiente expositor" : "Finalizar presentación"}
+                aria-label={nextPresentationId ? "Siguiente exposición" : "Finalizar presentación"}
                 className="flex h-10 w-10 items-center justify-center rounded-md bg-brand-700 text-white">
                 <Icon name="check" />
               </button>
@@ -431,7 +470,7 @@ export default function LivePage() {
         <Button variant="secondary" icon="logout" onClick={leave}>Abandonar</Button>
         {isHost && (
           <Button icon="check" onClick={finish}>
-            {nextPresentation ? "Siguiente expositor" : "Finalizar presentación"}
+            {nextPresentationId ? "Siguiente exposición" : "Finalizar presentación"}
           </Button>
         )}
       </div>

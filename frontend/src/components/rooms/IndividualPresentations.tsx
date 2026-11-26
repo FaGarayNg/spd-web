@@ -12,13 +12,15 @@ type Props = {
   presentations: UserPresentation[]
   /** Vuelve a consultar el listado después de subir o quitar. */
   onChanged: () => void
+  /** Abre el preview privado de la presentación propia (su UUID distingue cada archivo). */
+  onView: (presentationId: string) => void
   registerItem?: (key: string) => (element: HTMLElement | null) => void
 }
 
 // Cada participante sube su propio PDF/PPTX. El anfitrión arma la sala, define el orden y da el
 // inicio desde "Preparar sala": los participantes no lanzan su presentación desde acá.
 export function IndividualPresentations({
-  roomId, members, currentUserId, presentations, onChanged, registerItem,
+  roomId, members, currentUserId, presentations, onChanged, onView, registerItem,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -78,20 +80,25 @@ export function IndividualPresentations({
               <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
                 Lista · {mine.slides.length} diapositivas
               </span>
+              <Button variant="ghost" icon="eye" onClick={() => onView(mine.presentationId)}>Ver diapositivas</Button>
               <Button variant="ghost" icon="trash" onClick={remove} disabled={removing}>
                 {removing ? "Quitando…" : "Quitar"}
               </Button>
             </>
           ) : (
-            <Button icon="upload" onClick={() => inputRef.current?.click()} disabled={uploading}>
-              {uploading ? "Subiendo y convirtiendo…" : "Cargar mi presentación"}
-            </Button>
+            <>
+              <Button icon="upload" onClick={() => inputRef.current?.click()} disabled={uploading}>
+                {uploading ? "Subiendo y convirtiendo…" : "Cargar mi presentación"}
+              </Button>
+              <small className="text-ink/60">PDF o PPTX · máximo {MAX_UPLOAD_MB} MB</small>
+            </>
           )}
         </div>
       )}
 
       {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
 
+      <h3 className="text-base font-semibold text-brand-700 sm:text-lg">Participantes</h3>
       <ul className="flex flex-col gap-2">
         {members.map((person) => {
           const p = byUser.get(person.id)

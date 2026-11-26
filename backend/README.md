@@ -144,7 +144,10 @@ de subida. Sirve para precargar todas las imágenes.
 
 Devuelve la imagen. `slide_id` es el número de diapositiva, empezando en 1, o el nombre del
 archivo (`003.png`). Las presentaciones son inmutables, así que la respuesta se puede cachear
-indefinidamente (`Cache-Control: immutable`).
+indefinidamente (`Cache-Control: immutable`). Los endpoints **privados** de preview (`/preview` y
+`/my-presentation/slides/:slide_id`, y los equivalentes de grupo) responden `no-store`: una
+presentación puede reemplazarse y las URLs individuales no cambian, así que un caché del
+navegador podría mostrar las imágenes anteriores.
 
 ### `POST /api/presentations/:id/control`
 
@@ -259,6 +262,7 @@ lo borrado deja de verse en la API, pero sigue en la base de datos.
 | `/api/rooms`                                     | `GET`, `POST`            | Salas                                                           |
 | `/api/rooms/:id`                                 | `GET`, `PATCH`, `DELETE` | Una sala (borrarla borra sus grupos, presentaciones y miembros) |
 | `/api/rooms/:id/order`                           | `PATCH`                  | Guarda el orden de presentación elegido (solo el anfitrión)      |
+| `/api/rooms/:id/access-key`                      | `GET`                    | Clave de ingreso en claro (solo el anfitrión)                    |
 | `/api/rooms/:id/members`                         | `GET`, `POST`            | Miembros (`GET` los lista, ver abajo; `POST` une a uno)         |
 | `/api/rooms/:id/members/:user_id`                | `DELETE`                 | Saca a un usuario de la sala y de sus grupos                    |
 | `/api/rooms/:id/groups`                          | `GET`, `POST`            | Grupos de la sala, en orden de paso para presentar              |
@@ -288,6 +292,10 @@ Los demás integrantes reciben 403. Cuando el último integrante sale del grupo 
 o se borra su usuario), `store` quita la presentación asignada **automáticamente** en la misma
 transacción: un grupo vacío no necesita que nadie intervenga.
 
+`GET /api/rooms/:id/my-presentation/preview` y `GET /api/rooms/:id/my-presentation/slides/:slide_id`
+son el equivalente del formato individual y solo responden para el dueño de esa presentación;
+cualquier otro integrante recibe 404.
+
 El preview de las diapositivas de un grupo **no** usa el endpoint público de `presentations`:
 `GET /preview` y `GET /slides/:slide_id` pasan por `rooms`, que exige sesión y comprueba que el
 usuario integre ese grupo (401 sin sesión, 403 si no). El anfitrión no puede espiar un grupo del
@@ -297,7 +305,9 @@ ven todos los espectadores.
 En formato individual, `POST /api/rooms/:id/my-presentation` asigna la propia con
 `{"presentation_id": "<uuid>", "slides": [1, 2]}` (`slides` opcional; sin él, todas). El usuario
 sale del JWT, no del cuerpo: nadie puede adjudicarse la de otro. Un usuario tiene a lo sumo una
-presentación activa por sala; volver a asignar reactiva la misma fila. `GET /user-presentations`
+presentación activa por sala; volver a asignar **reemplaza** el UUID y las diapositivas de esa
+misma fila (estuviera activa o borrada), así que el preview no puede mostrar el archivo anterior.
+`GET /user-presentations`
 lista las de la sala (es público, como los integrantes) y `PUT /my-presentation/live` la publica
 su dueño. El anfitrión no aparece en ese listado y no puede cargar ni publicar por estos
 endpoints: arma la sala y define el orden; para exponer la suya usa "Presentación propia"
@@ -325,7 +335,7 @@ curl -X POST -H 'Content-Type: application/json' \
 | Recurso                    | Campos que se envían                                          | Reglas                                                     |
 |----------------------------|---------------------------------------------------------------|------------------------------------------------------------|
 | Usuario                    | `full_name`, `email`, `password`, `roles` (opcional)          | Correo único sin distinguir mayúsculas; contraseña de al menos 8 caracteres (máximo 72 bytes), nunca se devuelve |
-| Sala                       | `name`, `url` (opcional), `access_key` (opcional), `format` (opcional) | `url` absoluta http(s); la clave (al menos 4 caracteres, máximo 72 bytes) nunca se devuelve: la respuesta trae `has_access_key`. `PATCH` con `"access_key": ""` la quita. `format` es `groups` (por grupo) o `individual` (por participante). El alta requiere sesión y el creador queda como `owner_id` (anfitrión); las respuestas incluyen `owner_id` y `format` |
+| Sala                       | `name`, `url` (opcional), `access_key` (opcional), `format` (opcional) | `url` absoluta http(s); la clave (al menos 4 caracteres, máximo 72 bytes) se guarda en el servidor junto a su hash. Los listados solo traen `has_access_key`; `GET /api/rooms/:id/access-key` la devuelve en claro **solo al anfitrión**. `PATCH` con `"access_key": ""` la quita. `format` es `groups` (por grupo) o `individual` (por participante). El alta requiere sesión y el creador queda como `owner_id` (anfitrión); las respuestas incluyen `owner_id` y `format` |
 | Miembro (`POST …/members`) | `user_id`, `access_key` (si la sala tiene clave)              | 201 al entrar o volver; 200 si ya era miembro; 403 con la clave incorrecta. Responde `{"user_id", "room_id", "joined_at"}` |
 | Grupo                      | `limit`, `priority`                                           | Ambos obligatorios en el alta, de 1 en adelante. `limit` es el cupo del grupo (máximo de integrantes): un `PATCH` no puede dejarlo por debajo de los integrantes actuales. `priority` es su prioridad de paso a la hora de presentar: los grupos de una sala se listan en ese orden (1 primero; a igual prioridad, el creado antes) |
 | Integrante (`POST …/groups/:id/members`) | `user_id`                                       | Tiene que ser miembro de la sala del grupo (409 si no). 201 al entrar o volver; 200 si ya era integrante; 409 si el grupo está completo. Un usuario puede estar en varios grupos, también de la misma sala. Responde `{"user_id", "group_id", "joined_at"}` |

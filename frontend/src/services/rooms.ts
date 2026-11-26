@@ -85,6 +85,11 @@ export function updateRoomOrder(
   return apiSend<ApiRoom>(`/rooms/${roomId}/order`, "PATCH", { kind, ids }).then(toRoom)
 }
 
+/** Clave de ingreso en claro, solo para el anfitrión de la sala. GET /api/rooms/:id/access-key */
+export function getRoomAccessKey(roomId: number | string): Promise<string> {
+  return apiGet<{ access_key: string }>(`/rooms/${roomId}/access-key`).then((data) => data.access_key)
+}
+
 /** Cierra (borra) una sala. Solo el anfitrión: el back devuelve 401 sin sesión o 403 si no es
  * el dueño. En cascada se borran grupos, presentaciones asignadas, integrantes y miembros.
  * DELETE /api/rooms/:id */
@@ -179,6 +184,11 @@ export function getGroupPresentations(groupId: number): Promise<ApiPresentation[
  * vienen por rutas protegidas por rooms (ver apiImage). */
 export function getGroupPreview(groupId: number, presentationId: string): Promise<ApiPresentationDetail> {
   return apiGet<ApiPresentationDetail>(`/groups/${groupId}/presentations/${presentationId}/preview`)
+}
+
+/** Preview de la presentación individual del usuario de la sesión: solo la suya. */
+export function getMyPreview(roomId: number | string): Promise<ApiPresentationDetail> {
+  return apiGet<ApiPresentationDetail>(`/rooms/${roomId}/my-presentation/preview`)
 }
 
 /** Asigna una presentación (subida a /api/presentations/upload) al grupo: la ve entera.

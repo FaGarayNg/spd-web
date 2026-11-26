@@ -9,7 +9,7 @@ import { PrepareRoom } from "../components/rooms/PrepareRoom"
 import { RoomHeader } from "../components/rooms/RoomHeader"
 import { SetupGroups } from "../components/rooms/SetupGroups"
 import { Button } from "../components/ui/Button"
-import { SlideGallery } from "../components/rooms/SlideGallery"
+import { SlideGallery, type PreviewSource } from "../components/rooms/SlideGallery"
 import { useSession } from "../context/SessionContext"
 import {
   assignGroupPresentation,
@@ -20,6 +20,7 @@ import {
   getGroupPresentations,
   getLiveSession,
   getRoom,
+  getRoomAccessKey,
   getRoomGroups,
   getRoomMembers,
   getUserPresentations,
@@ -33,7 +34,7 @@ import {
 import { uploadPresentation } from "../services/live"
 import { ApiError } from "../services/http"
 import type { ApiPresentation, Group, LiveSession, Member, Role, Room, UserPresentation } from "../types"
-import { getRoomKey, removeRoomKey } from "../utils/accessKey"
+import { generateAccessKey } from "../utils/accessKey"
 import { useFlip } from "../utils/flip"
 import { initials } from "../utils/initials"
 
@@ -66,11 +67,14 @@ export default function RoomPage() {
   const [preparing, setPreparing] = useState(false)
   const [loadError, setLoadError] = useState("")
   const [closing, setClosing] = useState(false)
+  const [rotatingKey, setRotatingKey] = useState(false)
+  const [accessKey, setAccessKey] = useState<string>()
+  const isHost = session?.userId !== undefined && room?.ownerId === session.userId
   const [attempt, setAttempt] = useState(0)
   // Presentaciones asignadas: groupId → asignación (o null si no tiene).
   const [assignments, setAssignments] = useState<Record<number, ApiPresentation | null>>({})
   const [uploadingGroupId, setUploadingGroupId] = useState<number | null>(null)
-  const [viewing, setViewing] = useState<{ groupId: number; presentationId: string; label: string } | null>(null)
+  const [viewing, setViewing] = useState<{ source: PreviewSource; label: string } | null>(null)
   // Sesión en vivo de la sala (la publica el anfitrión): null mientras no haya ninguna.
   const [live, setLive] = useState<LiveSession | null>(null)
   // Para detectar el ARRANQUE (no una sesión que ya estaba al entrar) y redirigir una sola vez.
@@ -158,6 +162,31 @@ export default function RoomPage() {
     const ids = format === "individual" ? room.individualOrder : room.groupOrder
     setOrderKeys((ids ?? []).map(String))
   }, [room?.id, format, room?.individualOrder, room?.groupOrder])
+
+  // La clave está en el servidor: cualquiera que sea el dispositivo, el anfitrión la obtiene acá.
+  useEffect(() => {
+    setAccessKey(undefined)
+    if (!isHost || !room?.hasAccessKey) return
+    let active = true
+    getRoomAccessKey(room.id)
+      .then((key) => active && setAccessKey(key))
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [room?.id, room?.hasAccessKey, isHost])
+
+  // Si se quita la presentación que estaba abierta, el preview no se queda mostrando la anterior.
+  useEffect(() => {
+    if (!viewing) return
+    if (viewing.source.kind === "group") {
+      const assigned = assignments[viewing.source.groupId]
+      if (!assigned || assigned.presentation_id !== viewing.source.presentationId) setViewing(null)
+    } else {
+      const mine = userPresentations.find((p) => p.userId === session?.userId)
+      if (!mine || mine.presentationId !== viewing.source.presentationId) setViewing(null)
+    }
+  }, [viewing, assignments, userPresentations, session?.userId])
 
   function loadIndividualPresentations() {
     if (room == null) return
@@ -282,36 +311,43 @@ export default function RoomPage() {
   // El anfitrión es el dueño de la sala (la crea con sesión iniciada y el back le guarda el
   // owner_id): ya no viaja el rol por la navegación, lo decide el backend. Salas sin dueño
   // (anteriores al login) o quien no es el dueño: espectadores.
-  const isHost = session?.userId !== undefined && room.ownerId === session.userId
   // En formato individual el anfitrión arma la sala pero no participa ni figura en el orden.
   // El sorteo reordena estas listas, no una vista interna del panel de preparación.
   const participants = applyOrder(
     members.filter((member) => member.id !== room.ownerId), orderKeys,
   )
   const orderedGroups = applyOrder(groups, orderKeys)
+  // Vista: grupos siempre en orden lógico por número, sin importar el sorteo de exposición.
+  const displayGroups = [...groups].sort((a, b) => a.priority - b.priority || a.id - b.id)
   const role: Role = isHost ? "host" : "guest"
   // La sala está armada cuando el anfitrión confirmó un formato, o cuando ya tiene grupos (las
   // salas de antes del login no guardaban formato). Lo decide el backend, así lo ven todos igual.
   const configured = room.format !== "" || groups.length > 0
   const activeMode = isHost ? mode : "watch"
-  const showList = !isHost || configured
-  const startLive = (livePresentationId: string | null, order: string[] = []) => {
+  const startLive = (
+    livePresentationId: string | null,
+    order: string[] = [],
+    kind: "group" | "individual" | "own" = room.format === "groups" ? "group" : "individual",
+    groupId?: number,
+  ) => {
     // El orden viaja con la navegación y se guarda para sobrevivir una recarga del anfitrión.
     if (order.length) sessionStorage.setItem(`spd.order.${room.id}`, JSON.stringify(order))
-    navigate(`/salas/${room.id}/en-vivo`, { state: { role, presentationId: livePresentationId, order } })
+    navigate(`/salas/${room.id}/en-vivo`, {
+      state: { role, presentationId: livePresentationId, order, kind, groupId },
+    })
   }
-  // "En sala" son las personas de la sala, no la suma de los grupos (así nadie se cuenta dos veces).
-  const inRoom = members.length
   const inAnyGroup = groups.some((g) => g.members.some((m) => m.joined))
 
   // Lanzar en vivo es publicar la sesión (PUT live-session) y entrar a la pantalla de proyección.
   // Si el lanzamiento falla, avisamos y no navegamos: la sala quedaría sin sesión publicada.
-  const launch = (livePresentationId: string) => {
+  const launch = (livePresentationId: string, groupId?: number, kind?: "group" | "individual" | "own") => {
     if (!room) return
+    const finalOrder = orderKeys.length ? orderKeys : orderedGroups.map((g) => String(g.id))
+    const finalKind = kind ?? (room.format === "groups" ? "group" : "individual")
     setLiveSession(room.id, livePresentationId)
       .then((session) => {
         setLive(session)
-        startLive(livePresentationId)
+        startLive(livePresentationId, finalOrder, finalKind, groupId)
       })
       .catch((err: unknown) =>
         setNotice(err instanceof Error ? err.message : "No se pudo lanzar la presentación en vivo."),
@@ -333,7 +369,6 @@ export default function RoomPage() {
     try {
       await clearLiveSession(room.id).catch(() => undefined)
       await deleteRoom(room.id)
-      removeRoomKey(room.id)
       setLive(null)
       navigate("/salas")
     } catch (err) {
@@ -439,14 +474,50 @@ export default function RoomPage() {
     setAssignments((current) => ({ ...current, [groupId]: null }))
   }
 
+  // El backend solo guarda un hash de la clave: si se perdió en este dispositivo, no hay forma
+  // de recuperarla. El anfitrión genera una nueva y se la guardamos acá para poder copiarla.
+  const rotateKey = async () => {
+    if (rotatingKey) return
+    setRotatingKey(true)
+    setNotice("")
+    const key = generateAccessKey()
+    try {
+      const updated = await updateRoom(room.id, { accessKey: key })
+      setAccessKey(key)
+      setRoom(updated)
+      setNotice("Nueva clave generada. Ya podés verla, copiarla y compartir el enlace.")
+    } catch (err: unknown) {
+      setNotice(err instanceof Error ? err.message : "No se pudo generar la clave.")
+    } finally {
+      setRotatingKey(false)
+    }
+  }
+
   const handleView = (group: Group) => {
     const assigned = assignments[group.id]
-    if (assigned) setViewing({ groupId: group.id, presentationId: assigned.presentation_id, label: `Grupo ${String(group.priority).padStart(2, "0")}` })
+    if (assigned) setViewing({
+      source: { kind: "group", groupId: group.id, presentationId: assigned.presentation_id, nonce: Date.now() + Math.random() },
+      label: `Grupo ${String(group.priority).padStart(2, "0")}`,
+    })
   }
+
+  // El backend busca la presentación por la sesión, pero el UUID va en la clave del preview:
+  // así, al cargar otra, el gallery recarga en vez de conservar las imágenes anteriores.
+  const handleViewOwn = (presentationId: string) =>
+    setViewing({ source: { kind: "individual", roomId: room.id, presentationId, nonce: Date.now() + Math.random() }, label: "Mi presentación" })
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8">
-      <RoomHeader roomId={room.id} title={room.name} accessKey={getRoomKey(room.id)} members={members.length} />
+      <RoomHeader
+        roomId={room.id}
+        title={room.name}
+        accessKey={accessKey}
+        members={members.length}
+        canSeeKey={isHost}
+        canRotateKey={isHost}
+        onRotateKey={rotateKey}
+        rotatingKey={rotatingKey}
+      />
 
       {notice && (
         <p role="alert" className="rounded-lg bg-brand-50 p-4 text-sm font-medium text-brand-700">
@@ -513,28 +584,25 @@ export default function RoomPage() {
         />
       ) : (
         <>
-          {showList && (
+          {configured && (
             <section className="flex flex-col gap-5">
-              <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+              {format === "group" && (
                 <h2 className="text-base font-semibold text-brand-700 sm:text-lg">
-                  {format === "group"
-                    ? isHost ? `${groups.length} grupos` : `${groups.length} grupos: elegí tu equipo`
-                    : `Personas en la sala (${members.length})`}
+                  {isHost ? `${groups.length} grupos` : `${groups.length} grupos: elegí tu equipo`}
                 </h2>
-                <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-700">{inRoom} en sala</span>
-              </div>
+              )}
               {format === "group" ? (
                 isHost ? (
                   <>
                     <p className="text-sm text-ink/60">
                       Así quedó la grilla. Los participantes eligen su equipo y cargan su archivo; vos definís el orden.
                     </p>
-                    <GroupOverview groups={orderedGroups} registerItem={registerFlip} />
+                    <GroupOverview groups={displayGroups} assignments={assignments} registerItem={registerFlip} />
                   </>
                 ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {orderedGroups.map((group) => (
-                      <div key={group.id} ref={registerFlip(String(group.id))}>
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {displayGroups.map((group) => (
+                      <div key={group.id} ref={registerFlip(String(group.id))} className="h-full">
                         <GroupCard
                         group={group}
                         currentUserId={session?.userId}
@@ -559,6 +627,7 @@ export default function RoomPage() {
                   currentUserId={isHost ? undefined : session?.userId}
                   presentations={userPresentations}
                   onChanged={loadIndividualPresentations}
+                  onView={handleViewOwn}
                   registerItem={registerFlip}
                 />
               )}
@@ -599,16 +668,18 @@ export default function RoomPage() {
                         .then((session) => {
                           setLive(session)
                           setPreparing(false)
-                          startLive(first.presentationId, orderedKeys)
+                          startLive(first.presentationId, orderedKeys, "individual")
                         })
                         .catch((err: unknown) =>
                           setNotice(err instanceof Error ? err.message : "No se pudo iniciar la presentación."),
                         )
                       return
                     }
-                    // El primer turno es el primer grupo con presentación asignada.
-                    const first = groups.find((g) => assignments[g.id])
-                    if (first) launch(assignments[first.id]!.presentation_id)
+                    // El primer turno es el primero del orden sorteado que tenga archivo, no el
+                    // primero por id: si no, el vivo arranca en "turno 2" con el orden al revés.
+                    const firstId = orderedKeys.map(Number).find((gid) => assignments[gid])
+                    const first = orderedGroups.find((g) => g.id === firstId)
+                    if (first) launch(assignments[first.id]!.presentation_id, first.id, "group")
                     else setNotice("Todavía no hay presentaciones asignadas: cargá el archivo desde la tarjeta de un grupo.")
                   }}
                 />
@@ -634,6 +705,14 @@ export default function RoomPage() {
               )}
             </section>
           )}
+          {!configured && !isHost && (
+            <div className="flex flex-col gap-2 rounded-lg border border-dashed border-border bg-surface p-6 text-center">
+              <h2 className="text-lg font-semibold text-brand-700">El anfitrión todavía está configurando la sala</h2>
+              <p className="text-sm text-ink/60">
+                En cuanto elija cómo se van a presentar, vas a ver acá a los participantes y sus presentaciones.
+              </p>
+            </div>
+          )}
         </>
       )}
 
@@ -652,7 +731,7 @@ export default function RoomPage() {
       )}
 
       {viewing && (
-        <SlideGallery groupId={viewing.groupId} presentationId={viewing.presentationId} label={viewing.label} onClose={() => setViewing(null)} />
+        <SlideGallery source={viewing.source} label={viewing.label} onClose={() => setViewing(null)} />
       )}
     </div>
   )

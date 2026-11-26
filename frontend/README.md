@@ -44,8 +44,10 @@ alcanza para consultar datos públicos.
 sesión**: sin JWT redirige a `/login` con el destino en `state.from` y, después
 del login (o el registro), vuelve al enlace. `POST /api/rooms/:id/members`
 valida la clave (403 = incorrecta) y usa el `userId` de la sesión, así que la
-pertenencia queda asociada a una cuenta real. Las claves se recuerdan por
-dispositivo (`utils/accessKey.ts`) porque el backend solo guarda el hash.
+pertenencia queda asociada a una cuenta real. La clave en claro **vive en el servidor**; el
+anfitrión la obtiene con `GET /rooms/:id/access-key` desde cualquier dispositivo u origen, y
+puede rotarla con **"Generar nueva clave"** en la cabecera de la sala. Los demás solo ven
+`has_access_key`.
 
 El anfitrión puede **cambiar el formato cuando quiera** desde "Cambiar modo de presentación".
 Al pasar a individual se borran los grupos armados (con sus integrantes y presentaciones) y se
@@ -61,7 +63,9 @@ en su próxima actualización. El botón "Ver diapositivas"
 aparece solo para quien integra ese grupo: el preview (metadatos e imágenes) se sirve desde
 `rooms`, que valida la pertenencia; los demás reciben 403 aunque conozcan el UUID. Dentro de cada grupo, solo el
 primer integrante (marcado como "Encargado") ve los botones para cargar y quitar la presentación;
-los demás ven una aclaración. Si el último integrante sale, el backend quita la presentación del
+los demás ven una aclaración. Cada uno puede abrir **"Ver diapositivas"** de su propia
+presentación: el preview individual también es privado y solo lo responde el backend para quien
+la subió. Si el último integrante sale, el backend quita la presentación del
 grupo automáticamente: el anfitrión no tiene que hacer nada.
 
 En **formato individual**, cada participante carga y publica su propio PDF/PPTX desde la
@@ -75,9 +79,10 @@ la sesión en vivo resultante. Cuando una sesión arranca, `RoomPage` detecta el
 polling de `live-session` y redirige a todos los presentes a la pantalla en vivo (si alguien
 llega cuando ya estaba en curso, no se lo saca de la sala). Simétricamente, `LivePage` detecta
 que la sesión pasó de activa a inexistente y devuelve a los espectadores al inicio de la sala;
-el anfitrión navega al confirmar "Finalizar presentación". En el formato individual, ese botón
-se convierte en "Siguiente expositor": publica la presentación del siguiente del orden y mantiene
-a todos en el vivo; cuando no queda nadie, sí termina la sesión y vuelven a la sala. En `LivePage`, el control de
+el anfitrión navega al confirmar "Finalizar presentación". Antes de ese cierre, el botón dice
+**"Siguiente exposición"**: publica la presentación del siguiente turno del orden (por usuario en
+formato individual, por grupo en formato grupal, saltando grupos sin archivo) y mantiene a todos
+en el vivo; cuando no queda nadie, sí termina la sesión y vuelven a la sala. En `LivePage`, el control de
 diapositivas y del lienzo lo tiene el anfitrión **o** el dueño de la presentación individual
 en vivo: se resuelve cruzando `presentation_id` con `/rooms/:id/user-presentations`, así que
 el permiso sigue al turno. Los trazos del canvas se mandan por el WebSocket y vuelven en cada

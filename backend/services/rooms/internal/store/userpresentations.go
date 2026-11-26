@@ -18,9 +18,24 @@ func (s *Store) SetUserPresentation(ctx context.Context, p domain.UserPresentati
 		if err := take(tx.Clauses(lockShare), &room{}, domain.ErrRoomNotFound, "id = ?", p.RoomID); err != nil {
 			return err
 		}
-		return tx.Clauses(reactivate("user_presentations",
+		res := tx.Clauses(reactivate("user_presentations",
 			[]string{"room_id", "user_id"},
-			"presentation_id", "slides", "created_at", "updated_at")).Create(&row).Error
+			"presentation_id", "slides", "created_at", "updated_at")).Create(&row)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			// Ya hay una fila ACTIVA para este usuario en la sala: el ON CONFLICT solo reactiva
+			// borradas, así que acá tenemos que reemplazarla de verdad. Si no, la API responde
+			// el UUID nuevo pero la base (y el preview) siguen con el anterior.
+			return tx.Model(&userPresentation{}).
+				Where("room_id = ? AND user_id = ?", p.RoomID, p.UserID).
+				Updates(map[string]any{
+					"presentation_id": p.ID,
+					"slides":          Array[int32](p.Slides),
+				}).Error
+		}
+		return nil
 	})
 	if err != nil {
 		return domain.UserPresentation{}, err

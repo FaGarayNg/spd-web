@@ -6,7 +6,9 @@ import { apiGet, apiSend, apiUpload } from "./http"
 
 // ─── Presentations ──────────────────────────────────────────────────────────────────────────
 
-const MAX_UPLOAD_MB = 100 // alinear con el MAX_UPLOAD_MB que configure el backend
+// Coincide con el valor por defecto del backend (MAX_UPLOAD_MB). Si se cambia el backend,
+// hay que cambiar también este valor para que el cartel y la validación no mientan.
+const MAX_UPLOAD_MB = 10
 
 /** Una presentación: metadatos y la lista de diapositivas. GET /api/presentations/:id */
 export function getPresentation(id: string): Promise<ApiPresentationDetail> {

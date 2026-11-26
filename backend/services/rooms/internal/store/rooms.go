@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Store) CreateRoom(ctx context.Context, r domain.Room) (domain.Room, error) {
-	row := room{Name: r.Name, URL: r.URL, AccessKeyHash: r.AccessKeyHash}
+	row := room{Name: r.Name, URL: r.URL, AccessKey: r.AccessKey, AccessKeyHash: r.AccessKeyHash}
 	if r.OwnerID != 0 {
 		row.OwnerID = &r.OwnerID
 	}
@@ -41,6 +41,9 @@ func (s *Store) UpdateRoom(ctx context.Context, id uint, ch domain.RoomUpdate) (
 	}
 	if ch.AccessKeyHash != nil {
 		changes["access_key_hash"] = *ch.AccessKeyHash
+	}
+	if ch.AccessKey != nil {
+		changes["access_key"] = *ch.AccessKey
 	}
 	if ch.Format != nil {
 		changes["format"] = *ch.Format

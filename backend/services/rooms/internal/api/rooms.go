@@ -96,6 +96,25 @@ func (h *Handler) updateRoomOrder(c *gin.Context) {
 	h.reply(c, http.StatusOK, r, err)
 }
 
+// roomAccessKey devuelve la clave en claro solo al dueño de la sala.
+func (h *Handler) roomAccessKey(c *gin.Context) {
+	noStore(c)
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	key, err := h.svc.RoomAccessKey(c.Request.Context(), caller, id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"access_key": key})
+}
+
 // deleteRoom atiende DELETE /api/rooms/:id. Solo el anfitrión.
 func (h *Handler) deleteRoom(c *gin.Context) {
 	caller, ok := h.currentUser(c)

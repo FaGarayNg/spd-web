@@ -667,3 +667,91 @@ func TestRemovePresentationByEncargadoOrHost(t *testing.T) {
 		t.Fatalf("grupo vacío: %v", err)
 	}
 }
+
+func TestMyPreviewOnlyForItsOwner(t *testing.T) {
+	svc := newService(t, catalogOK)
+	const hostID = uint(999)
+	r, err := svc.CreateRoom(ctx, hostID, domain.NewRoom{Name: "Preview individual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ana := mustUser(t, svc, "ana@preview-individual.test")
+	beto := mustUser(t, svc, "beto@preview-individual.test")
+	for _, u := range []domain.User{ana, beto} {
+		if _, _, err := svc.JoinRoom(ctx, r.ID, domain.Join{UserID: u.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.SetUserPresentation(ctx, ana.ID, r.ID, domain.NewPresentation{PresentationID: pres3}); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := svc.MyPreview(ctx, ana.ID, r.ID)
+	if err != nil || preview.SlideCount != 3 {
+		t.Fatalf("propio = %+v, err = %v", preview, err)
+	}
+	img, err := svc.MySlide(ctx, ana.ID, r.ID, "1")
+	if err != nil {
+		t.Fatalf("imagen propia: %v", err)
+	}
+	_ = img.Body.Close()
+
+	_, err = svc.MyPreview(ctx, beto.ID, r.ID)
+	expect(t, "otro integrante", err, domain.ErrUserPresentationNotFound)
+	_, err = svc.MyPreview(ctx, 0, r.ID)
+	expect(t, "anónimo", err, domain.ErrUnauthenticated)
+}
+
+func TestSetUserPresentationReplacesAnActiveOne(t *testing.T) {
+	svc := newService(t, catalogOK)
+	const hostID = uint(999)
+	r, err := svc.CreateRoom(ctx, hostID, domain.NewRoom{Name: "Reemplazo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ana := mustUser(t, svc, "reemplazo@individual.test")
+	if _, _, err := svc.JoinRoom(ctx, r.ID, domain.Join{UserID: ana.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SetUserPresentation(ctx, ana.ID, r.ID, domain.NewPresentation{PresentationID: pres3}); err != nil {
+		t.Fatal(err)
+	}
+	// Segunda carga sin quitar la anterior: debe reemplazar el UUID en la base.
+	if _, err := svc.SetUserPresentation(ctx, ana.ID, r.ID, domain.NewPresentation{PresentationID: pres5}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := svc.UserPresentation(ctx, ana.ID, r.ID)
+	if err != nil || p.ID != pres5 {
+		t.Fatalf("presentación guardada = %+v, err = %v; se esperaba %s", p, err, pres5)
+	}
+	preview, err := svc.MyPreview(ctx, ana.ID, r.ID)
+	if err != nil || preview.PresentationID != pres5 {
+		t.Fatalf("preview = %+v, err = %v", preview, err)
+	}
+}
+
+func TestRoomAccessKeyOnlyForOwner(t *testing.T) {
+	svc := newService(t, catalogOK)
+	const hostID = uint(999)
+	r, err := svc.CreateRoom(ctx, hostID, domain.NewRoom{Name: "Clave servidor", AccessKey: "ABC-123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := svc.RoomAccessKey(ctx, hostID, r.ID)
+	if err != nil || key != "ABC-123" {
+		t.Fatalf("clave = %q, err = %v", key, err)
+	}
+	if _, err := svc.RoomAccessKey(ctx, 123, r.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("otro usuario: err = %v", err)
+	}
+	if _, err := svc.RoomAccessKey(ctx, 0, r.ID); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("anónimo: err = %v", err)
+	}
+	if _, err := svc.UpdateRoom(ctx, hostID, r.ID, domain.RoomChanges{AccessKey: ptr("XYZ-789")}); err != nil {
+		t.Fatal(err)
+	}
+	key, err = svc.RoomAccessKey(ctx, hostID, r.ID)
+	if err != nil || key != "XYZ-789" {
+		t.Fatalf("clave rotada = %q, err = %v", key, err)
+	}
+}

@@ -5,7 +5,7 @@ import { Button } from "../components/ui/Button"
 import { Field } from "../components/ui/Field"
 import { useSession } from "../context/SessionContext"
 import { createRoom, joinRoom } from "../services/rooms"
-import { generateAccessKey, saveRoomKey } from "../utils/accessKey"
+import { generateAccessKey } from "../utils/accessKey"
 
 // POST /api/rooms. Reglas del backend: nombre obligatorio (hasta 200 caracteres),
 // clave de 4+ caracteres (se guarda hasheada; después ya no se puede leer).
@@ -52,7 +52,6 @@ export default function CreateRoomPage() {
     const key = accessKey.trim() || generateAccessKey()
     try {
       const room = await createRoom({ name: name.trim(), accessKey: key })
-      saveRoomKey(room.id, key)
       // Quien crea la sala cuenta como integrante (si tiene usuario real en el back).
       if (session?.userId !== undefined) {
         await joinRoom(room.id, { userId: session.userId, accessKey: key }).catch(() => false)

@@ -41,6 +41,25 @@ func (s *Service) GroupSlide(ctx context.Context, callerID, groupID uint, presen
 	return s.catalog.SlideImage(ctx, presentationID, slideID)
 }
 
+// MyPreview y MySlide sirven el preview de la presentación individual del usuario de la sesión.
+// UserPresentation ya exige sesión pertenencia y devuelve solo la del propio caller: nadie más
+// puede ver la galería aunque conozca el UUID.
+func (s *Service) MyPreview(ctx context.Context, callerID, roomID uint) (PresentationPreview, error) {
+	p, err := s.UserPresentation(ctx, callerID, roomID)
+	if err != nil {
+		return PresentationPreview{}, err
+	}
+	return s.catalog.Preview(ctx, p.ID)
+}
+
+func (s *Service) MySlide(ctx context.Context, callerID, roomID uint, slideID string) (SlideImage, error) {
+	p, err := s.UserPresentation(ctx, callerID, roomID)
+	if err != nil {
+		return SlideImage{}, err
+	}
+	return s.catalog.SlideImage(ctx, p.ID, slideID)
+}
+
 func (s *Service) checkPreviewAccess(ctx context.Context, callerID, groupID uint, presentationID string) error {
 	if callerID == 0 {
 		return ErrUnauthenticated

@@ -48,6 +48,7 @@ func (s *Service) CreateRoom(ctx context.Context, ownerID uint, in NewRoom) (Roo
 	if r.AccessKeyHash, err = accessKeyHash(in.AccessKey); err != nil {
 		return Room{}, err
 	}
+	r.AccessKey = in.AccessKey
 	r.OwnerID = ownerID
 	return s.store.CreateRoom(ctx, r)
 }
@@ -92,6 +93,8 @@ func (s *Service) UpdateRoom(ctx context.Context, callerID, id uint, in RoomChan
 			return Room{}, err
 		}
 		ch.AccessKeyHash = &v
+		key := *in.AccessKey
+		ch.AccessKey = &key
 	}
 	if in.Format != nil {
 		v, err := checkFormat(*in.Format)
@@ -156,6 +159,22 @@ func checkAccessKey(r Room, key string) error {
 // RoomMembers devuelve los miembros de una sala, ordenados por id.
 func (s *Service) RoomMembers(ctx context.Context, roomID uint) ([]Member, error) {
 	return s.store.RoomMembers(ctx, roomID)
+}
+
+// RoomAccessKey devuelve la clave en claro solo al anfitrión. Está en el servidor para que no
+// dependa del navegador donde se creó la sala; el hash sigue siendo lo que valida el ingreso.
+func (s *Service) RoomAccessKey(ctx context.Context, callerID, roomID uint) (string, error) {
+	if callerID == 0 {
+		return "", ErrUnauthenticated
+	}
+	r, err := s.store.GetRoom(ctx, roomID)
+	if err != nil {
+		return "", err
+	}
+	if r.OwnerID != callerID {
+		return "", ErrForbidden
+	}
+	return r.AccessKey, nil
 }
 
 // LeaveRoom saca a un usuario de una sala y de los grupos de esa sala.
