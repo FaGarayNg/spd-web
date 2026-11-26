@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { RoomCard } from "../components/rooms/RoomCard"
 import { Button } from "../components/ui/Button"
 import { useSession } from "../context/SessionContext"
@@ -19,6 +19,8 @@ const TABS: { role: Role; label: string; empty: string }[] = [
 
 export default function RoomsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const noticeFromRedirect = (location.state as { notice?: string } | null)?.notice
   const { session } = useSession()
   const [role, setRole] = useState<Role>("host")
   const [rooms, setRooms] = useState<Room[]>([])
@@ -28,38 +30,46 @@ export default function RoomsPage() {
 
   useEffect(() => {
     let active = true
-    setLoading(true)
-    setError("")
-    // Con sesión iniciada: las salas del usuario, filtradas por el rol de la pestaña.
-    // Sin sesión: nada que mostrar todavía.
-    const userId = session?.userId
-    const request =
-      userId === undefined
-        ? Promise.resolve([] as Room[])
-        : getUserRooms(userId).then((list) =>
-            list.filter((room) => (role === "host" ? room.ownerId === userId : room.ownerId !== userId)),
-          )
-    request
-      .then((result) => {
-        if (!active) return
-        setRooms(result)
-        setLoading(false)
-        // El listado no trae los integrantes: se piden por sala (si alguno falla, no se muestra).
-        Promise.all(
-          result.map((room) =>
-            getRoomMembers(room.id).then((list) => [room.id, list.length] as const).catch(() => null),
-          ),
-        ).then((pairs) => {
-          if (active) setCounts(Object.fromEntries(pairs.filter((pair) => pair !== null)))
+    const load = (first: boolean) => {
+      if (first) {
+        setLoading(true)
+        setError("")
+      }
+      // Con sesión iniciada: las salas del usuario, filtradas por el rol de la pestaña.
+      const userId = session?.userId
+      const request =
+        userId === undefined
+          ? Promise.resolve([] as Room[])
+          : getUserRooms(userId).then((list) =>
+              list.filter((room) => (role === "host" ? room.ownerId === userId : room.ownerId !== userId)),
+            )
+      request
+        .then((result) => {
+          if (!active) return
+          setRooms(result)
+          setLoading(false)
+          Promise.all(
+            result.map((room) =>
+              getRoomMembers(room.id).then((list) => [room.id, list.length] as const).catch(() => null),
+            ),
+          ).then((pairs) => {
+            if (active) setCounts(Object.fromEntries(pairs.filter((pair) => pair !== null)))
+          })
         })
-      })
-      .catch((err: unknown) => {
-        if (!active) return
-        setError(err instanceof Error ? err.message : "No se pudieron cargar las salas.")
-        setLoading(false)
-      })
+        .catch((err: unknown) => {
+          if (!active) return
+          setError(err instanceof Error ? err.message : "No se pudieron cargar las salas.")
+          setLoading(false)
+        })
+    }
+    load(true)
+    // Si lo expulsan desde otra pestaña, la sala desaparece del listado sin recargar.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") load(false)
+    }, 2000)
     return () => {
       active = false
+      window.clearInterval(timer)
     }
   }, [role, session?.userId])
 
@@ -79,6 +89,12 @@ export default function RoomsPage() {
           </Button>
         )}
       </div>
+
+      {noticeFromRedirect && (
+        <p role="status" className="rounded-lg bg-brand-50 p-4 text-sm text-brand-700">
+          {noticeFromRedirect} Para volver, pedile el enlace y la clave al anfitrión.
+        </p>
+      )}
 
       <div className="flex gap-6 border-b border-border" role="tablist">
         {TABS.map((item) => (

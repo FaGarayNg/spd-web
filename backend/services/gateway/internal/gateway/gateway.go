@@ -78,6 +78,7 @@ func Register(r gin.IRouter, up Upstreams, log *slog.Logger) {
 	r.GET("/api/groups/:id", rooms)
 	r.PATCH("/api/groups/:id", rooms)
 	r.DELETE("/api/groups/:id", rooms)
+	r.PATCH("/api/groups/:id/encargado", rooms)
 	r.GET("/api/groups/:id/members", rooms)
 	r.POST("/api/groups/:id/members", rooms)
 	r.DELETE("/api/groups/:id/members/:user_id", rooms)

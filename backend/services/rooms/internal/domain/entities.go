@@ -95,8 +95,11 @@ type Group struct {
 	RoomID    uint      `json:"room_id"`
 	Limit     int       `json:"limit"`
 	Priority  int       `json:"priority"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// EncargadoID es el integrante que carga/quita la presentación del grupo. 0 si el grupo
+	// quedó sin encargado. Se puede transferir a otro integrante.
+	EncargadoID uint      `json:"encargado_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Presentation asigna a un grupo una presentación del servicio presentations (Presentacion): su

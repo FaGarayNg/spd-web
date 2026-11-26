@@ -50,6 +50,25 @@ func (h *Handler) deleteGroup(c *gin.Context) {
 	h.noContent(c, h.svc.DeleteGroup(c.Request.Context(), caller, id))
 }
 
+// transferEncargado atiende PATCH /api/groups/:id/encargado. Lo hace el encargado actual o el anfitrión.
+func (h *Handler) transferEncargado(c *gin.Context) {
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	var in struct {
+		UserID uint `json:"user_id"`
+	}
+	if !bind(c, &in) {
+		return
+	}
+	h.noContent(c, h.svc.TransferEncargado(c.Request.Context(), caller, id, in.UserID))
+}
+
 // groupMembers atiende GET /api/groups/:id/members.
 func (h *Handler) groupMembers(c *gin.Context) {
 	id, ok := idParam(c, "id")

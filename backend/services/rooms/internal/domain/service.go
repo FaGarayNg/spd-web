@@ -10,14 +10,14 @@ var (
 	// ErrInvalid indica datos de entrada inválidos; el mensaje dice cuál y por qué.
 	ErrInvalid = errors.New("datos inválidos")
 
-	ErrUserNotFound         = errors.New("usuario no encontrado")
-	ErrRoomNotFound         = errors.New("sala no encontrada")
-	ErrGroupNotFound        = errors.New("grupo no encontrado")
-	ErrPresentationNotFound = errors.New("presentación no encontrada en el grupo")
+	ErrUserNotFound             = errors.New("usuario no encontrado")
+	ErrRoomNotFound             = errors.New("sala no encontrada")
+	ErrGroupNotFound            = errors.New("grupo no encontrado")
+	ErrPresentationNotFound     = errors.New("presentación no encontrada en el grupo")
 	ErrUserPresentationNotFound = errors.New("el usuario no tiene una presentación propia en la sala")
-	ErrNotRoomMember        = errors.New("el usuario no es miembro de la sala")
-	ErrNotGroupMember       = errors.New("el usuario no es integrante del grupo")
-	ErrLiveSessionNotFound  = errors.New("la sala no tiene una presentación en vivo")
+	ErrNotRoomMember            = errors.New("el usuario no es miembro de la sala")
+	ErrNotGroupMember           = errors.New("el usuario no es integrante del grupo")
+	ErrLiveSessionNotFound      = errors.New("la sala no tiene una presentación en vivo")
 
 	// Autorización: la identidad llega en la cabecera Authorization (un JWT que valida el
 	// propio servicio; el gateway solo la reenvía). Sin sesión es 401; con sesión pero sin
@@ -27,21 +27,21 @@ var (
 
 	// Login: el mismo mensaje para correo inexistente y contraseña incorrecta, para no
 	// revelar qué cuentas existen.
-	ErrWrongCredentials = errors.New("correo o contraseña incorrectos")
+	ErrWrongCredentials = errors.New("Correo o contraseña incorrectos")
 
-	ErrEmailTaken             = errors.New("ya existe un usuario con ese correo")
-	ErrPresentationAssigned   = errors.New("la presentación ya está asignada")
-	ErrRoomMembershipRequired = errors.New("el usuario tiene que ser miembro de la sala para unirse a uno de sus grupos")
-	ErrGroupFull              = errors.New("el grupo está completo")
-	ErrLimitBelowMembers      = errors.New("el cupo no puede ser menor que los integrantes actuales")
-	ErrWrongAccessKey         = errors.New("clave de ingreso incorrecta")
+	ErrEmailTaken             = errors.New("Ya existe un usuario con ese correo")
+	ErrPresentationAssigned   = errors.New("La presentación ya está asignada")
+	ErrRoomMembershipRequired = errors.New("El usuario tiene que ser miembro de la sala para unirse a uno de sus grupos")
+	ErrGroupFull              = errors.New("El grupo está completo")
+	ErrLimitBelowMembers      = errors.New("El cupo no puede ser menor que los integrantes actuales")
+	ErrWrongAccessKey         = errors.New("Clave de ingreso incorrecta")
 	// ErrHostCannotPresent: el anfitrión conforma la sala, no participa del formato individual.
-	ErrHostCannotPresent = errors.New("el anfitrión no presenta en el formato individual")
+	ErrHostCannotPresent = errors.New("El anfitrión no presenta en el formato individual")
 
 	// ErrPresentationUnknown indica que el servicio presentations no tiene esa presentación.
-	ErrPresentationUnknown = errors.New("la presentación no existe en el servicio presentations")
+	ErrPresentationUnknown = errors.New("La presentación no existe en el servicio presentations")
 	// ErrCatalogUnavailable indica que no se pudo consultar el servicio presentations.
-	ErrCatalogUnavailable = errors.New("no se pudo consultar el servicio presentations")
+	ErrCatalogUnavailable = errors.New("No se pudo consultar el servicio presentations")
 )
 
 // Store guarda las entidades (lo implementa el paquete store). Recibe datos ya validados y
@@ -85,6 +85,8 @@ type Store interface {
 	// AddGroupMember une a un usuario a un grupo. created es false si ya era integrante.
 	AddGroupMember(ctx context.Context, groupID, userID uint) (m GroupMember, created bool, err error)
 	GroupMembers(ctx context.Context, groupID uint) ([]Member, error)
+	// SetEncargado transfiere el rol de encargado del grupo a otro integrante.
+	SetEncargado(ctx context.Context, groupID, userID uint) error
 	RemoveGroupMember(ctx context.Context, groupID, userID uint) error
 	UserGroups(ctx context.Context, userID uint) ([]Group, error)
 

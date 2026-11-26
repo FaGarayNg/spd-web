@@ -70,6 +70,7 @@ func (h *Handler) Register(r gin.IRouter) {
 	r.GET("/api/groups/:id", h.getGroup)
 	r.PATCH("/api/groups/:id", h.updateGroup)
 	r.DELETE("/api/groups/:id", h.deleteGroup)
+	r.PATCH("/api/groups/:id/encargado", h.transferEncargado)
 	r.GET("/api/groups/:id/members", h.groupMembers)
 	r.POST("/api/groups/:id/members", h.joinGroup)
 	r.DELETE("/api/groups/:id/members/:user_id", h.leaveGroup)

@@ -20,6 +20,8 @@ export default function JoinRoomPage() {
 
   const [room, setRoom] = useState<Room | null | undefined>(undefined)
   const [key, setKey] = useState("")
+  const [manualId, setManualId] = useState("")
+  const [manualKey, setManualKey] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
 
@@ -37,7 +39,7 @@ export default function JoinRoomPage() {
 
   // Sin token no hay userId real que mandar al backend: volver al login y regresar acá después.
   // El destino viaja en ?next= además del state para que no se pierda si el login se recarga.
-  const returnTo = `/unirse?sala=${encodeURIComponent(roomId)}`
+  const returnTo = roomId ? `/unirse?sala=${encodeURIComponent(roomId)}` : "/unirse"
   if (session?.token === undefined) {
     return <Navigate to={loginPath(returnTo)} state={{ from: returnTo }} replace />
   }
@@ -54,7 +56,7 @@ export default function JoinRoomPage() {
       navigate(`/salas/${room.id}`)
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.status === 403) setError("La clave no es correcta. Pedile la del anfitrión.")
+        if (err.status === 403) setError("La clave no es correcta. Pedile la clave al anfitrión.")
         else if (err.status === 404) setError("La sala ya no existe.")
         else setError(err.message)
       } else {
@@ -62,6 +64,66 @@ export default function JoinRoomPage() {
       }
       setSubmitting(false)
     }
+  }
+
+  const handleManualSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (session.userId === undefined) return
+    const id = Number(manualId.trim())
+    if (!Number.isInteger(id) || id <= 0) {
+      setError("Ingresá un número de sala válido.")
+      return
+    }
+    setSubmitting(true)
+    setError("")
+    try {
+      const target = await getRoom(String(id))
+      if (target.hasAccessKey && !manualKey.trim()) {
+        setError("Esta sala pide clave. Pedila al anfitrión.")
+        setSubmitting(false)
+        return
+      }
+      await joinRoom(id, { userId: session.userId, accessKey: manualKey.trim() || undefined })
+      navigate(`/salas/${id}`)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 404) setError("No encontramos esa sala. Revisá el número.")
+        else if (err.status === 403) setError("La clave no es correcta. Pedila al anfitrión.")
+        else setError(err.message)
+      } else {
+        setError("No se pudo entrar a la sala. Volvé a intentar.")
+      }
+      setSubmitting(false)
+    }
+  }
+
+  if (!roomId) {
+    return (
+      <SplitCard
+        title="Unirme a una sala"
+        text="Ingresá el número de sala que te pasó el anfitrión y su clave de ingreso."
+      >
+        <form onSubmit={handleManualSubmit} className="flex flex-col gap-5">
+          <h2 className="text-xl font-semibold text-brand-700">Buscar sala</h2>
+          <p className="text-sm text-ink/70">Entrás como <strong>{session.name}</strong>.</p>
+          <Field label="Número de sala" type="number" min={1} placeholder="Ej. 12" value={manualId}
+            onChange={(event) => setManualId(event.target.value)} required autoFocus />
+          <Field label="Clave de la sala (si tiene)" placeholder="Ej. A7K-29P" value={manualKey}
+            onChange={(event) => setManualKey(event.target.value)} />
+          {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
+          <Button type="submit" disabled={submitting}>
+            {submitting ? "Entrando…" : "Ingresar a la sala"}
+          </Button>
+          <p className="text-sm text-ink/70">
+            ¿Querés entrar con otra cuenta?{" "}
+            <button type="button" onClick={() => { signOut(); navigate(loginPath("/unirse"), { state: { from: "/unirse" } }) }}
+              className="font-semibold text-brand-500 hover:underline">
+              Cambiar de cuenta
+            </button>
+          </p>
+        </form>
+      </SplitCard>
+    )
   }
 
   if (room === undefined) return <p className="text-ink/60">Buscando la sala…</p>

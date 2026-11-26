@@ -430,3 +430,41 @@ func TestEncargadoIsFirstToJoinNotLowestId(t *testing.T) {
 		t.Fatalf("integrantes = %+v, se esperaba primero a %d", list, u2.ID)
 	}
 }
+
+func TestQuitarEncargadoPasaElRolAlSiguiente(t *testing.T) {
+	st, _ := newStore(t)
+	u1, err := st.CreateUser(ctx, domain.User{FullName: "Uno", Email: "uno@relevo.test", PasswordHash: "hash", Roles: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u2, err := st.CreateUser(ctx, domain.User{FullName: "Dos", Email: "dos@relevo.test", PasswordHash: "hash", Roles: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := st.CreateRoom(ctx, domain.Room{Name: "Relevo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := st.CreateGroup(ctx, domain.Group{RoomID: r.ID, Limit: 4, Priority: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []domain.User{u1, u2} {
+		if _, _, err := st.AddRoomMember(ctx, r.ID, u.ID, admitAll); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := st.AddGroupMember(ctx, g.ID, u.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SetEncargado(ctx, g.ID, u1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RemoveRoomMember(ctx, r.ID, u1.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetGroup(ctx, g.ID)
+	if err != nil || got.EncargadoID != u2.ID {
+		t.Fatalf("encargado = %d, err = %v; se esperaba %d", got.EncargadoID, err, u2.ID)
+	}
+}

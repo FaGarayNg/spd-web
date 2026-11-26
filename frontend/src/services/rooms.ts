@@ -107,6 +107,11 @@ export function createRoom(input: { name: string; url?: string; accessKey?: stri
   return apiSend<ApiRoom>("/rooms", "POST", body).then(toRoom)
 }
 
+/** Saca a un integrante de la sala (solo el anfitrión puede sacar a otros). */
+export function removeRoomMember(roomId: number | string, userId: number): Promise<void> {
+  return apiSend<void>(`/rooms/${roomId}/members/${userId}`, "DELETE")
+}
+
 /** Integrantes de una sala. GET /api/rooms/:id/members */
 export async function getRoomMembers(roomId: number): Promise<Member[]> {
   const members = await apiGet<ApiMember[]>(`/rooms/${roomId}/members`)
@@ -133,6 +138,7 @@ export async function getRoomGroups(roomId: number, sessionUserId: number | null
         id: group.id,
         limit: group.limit,
         priority: group.priority,
+        encargadoId: group.encargado_id,
         // El listado de integrantes ya trae nombre: { id, full_name, roles, joined_at }.
         members: groupMembers.map((m) => ({
           id: m.id,
@@ -147,6 +153,11 @@ export async function getRoomGroups(roomId: number, sessionUserId: number | null
 /** Borra un grupo (y sus presentaciones e integrantes). DELETE /api/groups/:id */
 export function deleteGroup(groupId: number): Promise<void> {
   return apiSend<void>(`/groups/${groupId}`, "DELETE")
+}
+
+/** Transfiere el rol de encargado a otro integrante del grupo. */
+export function transferEncargado(groupId: number, userId: number): Promise<void> {
+  return apiSend<void>(`/groups/${groupId}/encargado`, "PATCH", { user_id: userId })
 }
 
 /** Crea un grupo en la sala. POST /api/rooms/:id/groups */

@@ -4,18 +4,22 @@ import { SlideStage } from "../components/live/SlideStage"
 import { Button } from "../components/ui/Button"
 import { Icon } from "../components/ui/Icon"
 import { controlPresentation, connectPresentationSocket, type ControlCommand, type LiveSocket } from "../services/live"
-import { clearLiveSession, getGroupPresentations, getLiveSession, getRoom, getUserPresentations, setLiveSession } from "../services/rooms"
+import { clearLiveSession, getGroupPresentations, getLiveSession, getRoom, getRoomGroups, getRoomMembers, getUserPresentations, setLiveSession } from "../services/rooms"
 import { useSession } from "../context/SessionContext"
 import type { ApiError } from "../services/http"
 import type { ApiPresentation, ApiSlideState, CanvasStroke, Role, UserPresentation } from "../types"
+
+type LiveKind = "group" | "individual" | "own"
 
 type LocationState = {
   role?: Role
   presentationId?: string
   order?: string[]
-  kind?: "group" | "individual" | "own"
+  kind?: LiveKind
   groupId?: number
 }
+
+type SavedLive = { ids: string[]; kind?: LiveKind; groupId?: number }
 
 // La API de orientación no está en todos los navegadores (iOS Safari no la expone). Se usa
 // con guardas y, si falla, la presentación sigue funcionando igual.
@@ -52,18 +56,56 @@ export default function LivePage() {
   const navigate = useNavigate()
   const { session } = useSession()
   const state = (useLocation().state as LocationState | null) ?? {}
-  // Orden individual que configuró el anfitrión. Viaja en la navegación y se recupera si recargó.
-  const order = state.order ?? (() => {
+
+  // El vivo tampoco se puede ver sin sesión; al iniciar se vuelve a esta pantalla.
+  useEffect(() => {
+    if (session?.token === undefined) {
+      navigate("/login", { state: { from: `/salas/${id}/en-vivo` }, replace: true })
+    }
+  }, [session?.token, id, navigate])
+
+  // Si el anfitrión expulsa al usuario mientras está en el vivo, lo devolvemos al inicio.
+  useEffect(() => {
+    if (session?.userId === undefined) return
+    let active = true
+    const check = () => {
+      getRoomMembers(Number(id))
+        .then((list) => {
+          if (!active || list.some((member) => member.id === session.userId)) return
+          return getRoom(id).then((room) => {
+            if (active && room.ownerId !== session.userId) {
+              navigate("/salas", { state: { notice: "Fuiste quitado de la sala." }, replace: true })
+            }
+          })
+        })
+        .catch(() => undefined)
+    }
+    check()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") check()
+    }, 2000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [id, session?.userId, navigate])
+
+  // Orden y grupo viajan en la navegación; se guardan para sobrevivir una recarga.
+  const saved = (() => {
     try {
       const raw = sessionStorage.getItem(`spd.order.${id}`)
-      return raw ? (JSON.parse(raw) as string[]) : []
+      if (!raw) return null
+      const parsed = JSON.parse(raw) as SavedLive | string[]
+      return Array.isArray(parsed) ? { ids: parsed } : parsed
     } catch {
-      return []
+      return null
     }
   })()
-
-  const kind = state.kind ?? "individual"
-  const [currentGroupId, setCurrentGroupId] = useState(state.groupId)
+  const order = state.order ?? saved?.ids ?? []
+  const kind = state.kind ?? saved?.kind ?? "individual"
+  const [currentGroupId, setCurrentGroupId] = useState(state.groupId ?? saved?.groupId)
+  const [currentGroupLabel, setCurrentGroupLabel] = useState<string>()
+  const [currentGroupMembers, setCurrentGroupMembers] = useState<number[]>([])
   const [groupPresentations, setGroupPresentations] = useState<(ApiPresentation | null)[]>([])
   const isGroupMode = kind === "group" && currentGroupId !== undefined
 
@@ -229,7 +271,27 @@ export default function LivePage() {
     }
   }, [isGroupMode, order.join(",")])
 
-  const canControl = isHost || (session?.userId !== undefined && presenterId === session.userId)
+  useEffect(() => {
+    if (!isGroupMode || currentGroupId === undefined) return
+    let active = true
+    getRoomGroups(Number(id), session?.userId ?? null)
+      .then((groups) => {
+        const group = groups.find((g) => g.id === currentGroupId)
+        if (!active) return
+        setCurrentGroupLabel(group ? `Grupo ${String(group.priority).padStart(2, "0")}` : undefined)
+        setCurrentGroupMembers(group?.members.map((m) => m.id) ?? [])
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [isGroupMode, currentGroupId, id, session?.userId])
+
+  // En grupos manda cualquiera de los integrantes del grupo en turno, no solo el encargado.
+  const belongsToCurrentGroup = session?.userId !== undefined &&
+    currentGroupMembers.includes(session.userId)
+  const canControl = isHost || belongsToCurrentGroup ||
+    (session?.userId !== undefined && presenterId === session.userId)
 
   // "Siguiente exposición" pasa al siguiente del orden: en individual por usuario, en grupos por
   // grupo. Si no hay siguiente, el botón termina la sesión completa.
@@ -373,13 +435,29 @@ export default function LivePage() {
   }
 
   return (
-    <div className="flex h-[100dvh] flex-col gap-3 overflow-hidden px-3 pb-3 pt-2 sm:h-auto sm:gap-5 sm:overflow-visible sm:p-0">
+    <div className="flex h-[100dvh] flex-col gap-3 overflow-hidden p-3 sm:gap-5 sm:p-0">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 sm:gap-3">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <h1 className="hidden truncate text-base font-semibold text-brand-700 sm:block sm:text-2xl">Sala {id}</h1>
           <span className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[10px] font-bold text-brand-900 sm:px-3 sm:text-xs">
             {connection === "live" ? "EN VIVO" : connection === "connecting" ? "RECONECTANDO" : "DETENIDA"}
           </span>
+          {isGroupMode && currentGroupLabel && (
+            <span className="shrink-0 rounded-full bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-700 sm:text-xs">
+              Exponiendo: {currentGroupLabel}
+            </span>
+          )}
+          {!canControl ? (
+            <span className="shrink-0 rounded-full bg-brand-50 px-2 py-1 text-[10px] font-semibold text-brand-700 sm:text-xs">
+              Modo espectador
+            </span>
+          ) : (
+            !isHost && (
+              <span className="shrink-0 rounded-full bg-brand-50 px-2 py-1 text-[10px] font-semibold text-brand-700 sm:text-xs">
+                {isGroupMode ? "Tu grupo está exponiendo" : "Es tu turno"}
+              </span>
+            )
+          )}
           <span className="shrink-0 text-xs text-ink/70 sm:hidden">
             {sessionState.slide}/{sessionState.slide_count}
             {order.length > 0 && currentTurn >= 0 && (
@@ -388,12 +466,23 @@ export default function LivePage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="hidden items-center gap-2 text-sm text-ink/70 sm:inline-flex">
+          <span className="hidden items-center gap-2 text-sm text-ink/70 lg:inline-flex">
             <Icon name="eye" size={16} /> Diapositiva {sessionState.slide} de {sessionState.slide_count}
             {order.length > 0 && currentTurn >= 0 && (
               <span className="ml-2 text-ink/60">· Turno {currentTurn + 1} de {order.length}</span>
             )}
           </span>
+          <div className="hidden items-center gap-2 sm:flex">
+            <Button variant="secondary" icon={isFullscreen ? "minimize" : "expand"} onClick={toggleFullscreen}>
+              {isFullscreen ? "Salir" : "Pantalla completa"}
+            </Button>
+            <Button variant="secondary" icon="logout" onClick={leave}>Abandonar</Button>
+            {isHost && (
+              <Button icon="check" onClick={finish}>
+                {nextPresentationId ? "Siguiente exposición" : "Finalizar presentación"}
+              </Button>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 sm:hidden">
             <button type="button" onClick={toggleFullscreen}
               aria-label={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
@@ -417,7 +506,7 @@ export default function LivePage() {
 
       <div
         ref={presentationRef}
-        className={`flex min-h-0 flex-1 flex-col gap-3 sm:flex-none ${
+        className={`flex min-h-0 flex-1 flex-col gap-3 ${
           isFullscreen ? "fixed inset-0 z-50 h-[100dvh] w-screen bg-brand-900 p-2 sm:p-3" : ""
         }`}
       >
@@ -447,33 +536,6 @@ export default function LivePage() {
         </p>
       )}
 
-      <div className="hidden sm:block">
-        {!canControl ? (
-          <p className="flex items-center gap-2 rounded-lg bg-brand-50 p-4 text-sm text-brand-700">
-            <Icon name="eye" />
-            <span><strong>Modo espectador.</strong> Estás viendo la presentación en tiempo real.</span>
-          </p>
-        ) : (
-          !isHost && (
-            <p className="flex items-center gap-2 rounded-lg bg-brand-50 p-4 text-sm text-brand-700">
-              <Icon name="sparkles" />
-              <span><strong>Es tu turno.</strong> Podés avanzar las diapositivas y dibujar sobre ellas.</span>
-            </p>
-          )
-        )}
-      </div>
-
-      <div className="hidden flex-wrap gap-3 sm:flex">
-        <Button variant="secondary" icon={isFullscreen ? "minimize" : "expand"} onClick={toggleFullscreen}>
-          {isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
-        </Button>
-        <Button variant="secondary" icon="logout" onClick={leave}>Abandonar</Button>
-        {isHost && (
-          <Button icon="check" onClick={finish}>
-            {nextPresentationId ? "Siguiente exposición" : "Finalizar presentación"}
-          </Button>
-        )}
-      </div>
     </div>
   )
 }

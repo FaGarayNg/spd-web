@@ -157,8 +157,13 @@ func (h *Handler) joinRoom(c *gin.Context) {
 	h.reply(c, status, m, err)
 }
 
-// leaveRoom atiende DELETE /api/rooms/:id/members/:user_id.
+// leaveRoom atiende DELETE /api/rooms/:id/members/:user_id. Uno puede sacarse a sí mismo;
+// sacar a otro requiere ser el anfitrión de la sala.
 func (h *Handler) leaveRoom(c *gin.Context) {
+	caller, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
 	id, ok := idParam(c, "id")
 	if !ok {
 		return
@@ -166,6 +171,17 @@ func (h *Handler) leaveRoom(c *gin.Context) {
 	userID, ok := idParam(c, "user_id")
 	if !ok {
 		return
+	}
+	if caller != 0 && caller != userID {
+		r, err := h.svc.GetRoom(c.Request.Context(), id)
+		if err != nil {
+			h.fail(c, err)
+			return
+		}
+		if caller == 0 || r.OwnerID != caller {
+			h.fail(c, domain.ErrForbidden)
+			return
+		}
 	}
 	h.noContent(c, h.svc.LeaveRoom(c.Request.Context(), id, userID))
 }

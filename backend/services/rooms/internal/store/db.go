@@ -46,6 +46,14 @@ func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(&user{}, &room{}, &roomMember{}, &group{}, &groupMember{}, &presentation{}, &userPresentation{}, &liveSession{}); err != nil {
 		return fmt.Errorf("migrar la base de datos: %w", err)
 	}
+	// Grupos creados antes de guardar el rol: se les asigna como encargado a quien se unió primero.
+	if err := db.Exec(`UPDATE groups SET encargado_id = (
+		SELECT gm.user_id FROM group_members gm
+		WHERE gm.group_id = groups.id AND gm.deleted_at IS NULL
+		ORDER BY gm.created_at, gm.user_id LIMIT 1
+	) WHERE encargado_id = 0`).Error; err != nil {
+		return fmt.Errorf("migrar encargados: %w", err)
+	}
 	return nil
 }
 

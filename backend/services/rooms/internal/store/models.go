@@ -85,17 +85,18 @@ func (m roomMember) toDomain() domain.RoomMember {
 // presentar.
 type group struct {
 	gorm.Model
-	RoomID   uint  `gorm:"not null;index"`
-	Limit    int   `gorm:"not null"`
-	Priority int   `gorm:"not null"`
-	Room     *room `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	RoomID      uint  `gorm:"not null;index"`
+	Limit       int   `gorm:"not null"`
+	Priority    int   `gorm:"not null"`
+	EncargadoID uint  `gorm:"index;default:0"`
+	Room        *room `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
 }
 
 func (group) TableName() string { return "groups" }
 
 func (g group) toDomain() domain.Group {
 	return domain.Group{ID: g.ID, RoomID: g.RoomID, Limit: g.Limit, Priority: g.Priority,
-		CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
+		EncargadoID: g.EncargadoID, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
 }
 
 // groupMember es un DetalleGrupo: la relación n:m entre usuarios y grupos. La clave primaria es

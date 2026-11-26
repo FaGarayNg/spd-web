@@ -1,6 +1,6 @@
-import type { InputHTMLAttributes } from "react"
+import type { InputHTMLAttributes } from "react";
 
-type Props = InputHTMLAttributes<HTMLInputElement> & { label: string }
+type Props = InputHTMLAttributes<HTMLInputElement> & { label: string };
 
 export function Field({ label, className = "", ...props }: Props) {
   return (
@@ -11,5 +11,5 @@ export function Field({ label, className = "", ...props }: Props) {
         {...props}
       />
     </label>
-  )
+  );
 }

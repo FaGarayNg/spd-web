@@ -122,13 +122,28 @@ func (s *Store) AddGroupMember(ctx context.Context, groupID, userID uint) (domai
 
 		m = groupMember{UserID: userID, GroupID: groupID}
 		res := tx.Clauses(reactivate("group_members", []string{"user_id", "group_id"}, "created_at")).Create(&m)
-		created = res.Error == nil
-		return res.Error
+		if res.Error != nil {
+			return res.Error
+		}
+		// El primer integrante queda como encargado; los siguientes no cambian el rol.
+		if g.EncargadoID == 0 {
+			if err := tx.Model(&group{}).Where("id = ?", groupID).Update("encargado_id", userID).Error; err != nil {
+				return err
+			}
+		}
+		created = true
+		return nil
 	})
 	if err != nil {
 		return domain.GroupMember{}, false, err
 	}
 	return m.toDomain(), created, nil
+}
+
+// SetEncargado cambia el integrante que administra la presentación del grupo.
+func (s *Store) SetEncargado(ctx context.Context, groupID, userID uint) error {
+	return s.db.WithContext(ctx).Model(&group{}).Where("id = ?", groupID).
+		Update("encargado_id", userID).Error
 }
 
 func (s *Store) GroupMembers(ctx context.Context, groupID uint) ([]domain.Member, error) {
@@ -142,12 +157,38 @@ func (s *Store) GroupMembers(ctx context.Context, groupID uint) ([]domain.Member
 
 func (s *Store) RemoveGroupMember(ctx context.Context, groupID, userID uint) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var m groupMember
+		if err := take(tx, &m, domain.ErrNotGroupMember, "group_id = ? AND user_id = ?", groupID, userID); err != nil {
+			return err
+		}
+		if err := reassignEncargadoIfNeeded(tx, groupID, userID); err != nil {
+			return err
+		}
 		res := tx.Where("group_id = ? AND user_id = ?", groupID, userID).Delete(&groupMember{})
 		if err := deleted(res, domain.ErrNotGroupMember); err != nil {
 			return err
 		}
 		return clearPresentationIfEmpty(tx, groupID)
 	})
+}
+
+// reassignEncargadoIfNeeded pasa el rol al siguiente integrante del grupo cuando se va quien lo
+// tenía. Se llama ANTES de borrar la pertenencia, para que el sucesor esté todavía en la consulta.
+func reassignEncargadoIfNeeded(tx *gorm.DB, groupID, leavingUserID uint) error {
+	var g group
+	if err := tx.Where("id = ?", groupID).First(&g).Error; err != nil {
+		return err
+	}
+	if g.EncargadoID != leavingUserID {
+		return nil
+	}
+	var nextID uint
+	if err := tx.Model(&groupMember{}).
+		Where("group_id = ? AND user_id <> ?", groupID, leavingUserID).
+		Order("created_at, user_id").Limit(1).Pluck("user_id", &nextID).Error; err != nil {
+		return err
+	}
+	return tx.Model(&group{}).Where("id = ?", groupID).Update("encargado_id", nextID).Error
 }
 
 // clearPresentationIfEmpty quita la presentación asignada cuando el grupo se queda sin

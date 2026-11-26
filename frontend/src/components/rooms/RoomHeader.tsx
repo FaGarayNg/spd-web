@@ -73,18 +73,12 @@ export function RoomHeader({
         <div className="min-w-0">
           <h1 className="break-words text-xl font-semibold text-brand-700 sm:text-2xl">{title}</h1>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-700">Activa</span>
-            {members !== undefined && (
-              <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-700"
-                title="El conteo incluye al anfitrión">
-                {members} en sala
-              </span>
-            )}
-          </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-700">Activa</span>
           {members !== undefined && (
-            <small className="text-xs text-ink/60">El conteo incluye al anfitrión.</small>
+            <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-700">
+              {members} en sala
+            </span>
           )}
         </div>
       </div>

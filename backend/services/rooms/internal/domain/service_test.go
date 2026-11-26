@@ -755,3 +755,37 @@ func TestRoomAccessKeyOnlyForOwner(t *testing.T) {
 		t.Fatalf("clave rotada = %q, err = %v", key, err)
 	}
 }
+
+func TestTransferirEncargado(t *testing.T) {
+	svc := newService(t, catalogOK)
+	r := mustRoom(t, svc, domain.NewRoom{Name: "Transferencias"})
+	g := mustGroup(t, svc, r.ID, 4, 1)
+	mustUser(t, svc, "padding@transfer.test") // para que ana no sea también el dueño (id 1)
+	ana := mustUser(t, svc, "ana@transfer.test")
+	beto := mustUser(t, svc, "beto@transfer.test")
+	for _, u := range []domain.User{ana, beto} {
+		if _, _, err := svc.JoinRoom(ctx, r.ID, domain.Join{UserID: u.ID}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := svc.JoinGroup(ctx, g.ID, domain.GroupJoin{UserID: u.ID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := svc.GetGroup(ctx, g.ID)
+	if err != nil || got.EncargadoID != ana.ID {
+		t.Fatalf("encargado inicial = %d, err = %v", got.EncargadoID, err)
+	}
+	if err := svc.TransferEncargado(ctx, beto.ID, g.ID, ana.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("no encargado intenta transferir: err = %v", err)
+	}
+	if err := svc.TransferEncargado(ctx, ana.ID, g.ID, beto.ID); err != nil {
+		t.Fatalf("transferir: %v", err)
+	}
+	got, err = svc.GetGroup(ctx, g.ID)
+	if err != nil || got.EncargadoID != beto.ID {
+		t.Fatalf("encargado final = %d, err = %v", got.EncargadoID, err)
+	}
+	if err := svc.TransferEncargado(ctx, ana.ID, g.ID, ana.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("ex encargado vuelve a tomar el rol: err = %v", err)
+	}
+}

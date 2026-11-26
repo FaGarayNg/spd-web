@@ -202,11 +202,7 @@ export function SlideStage({
     <div className="flex h-full min-h-0 flex-col gap-3 sm:gap-4">
       <div
         ref={stageRef}
-        className={`relative w-full overflow-hidden rounded-lg border border-border bg-surface ${
-          fill
-            ? "min-h-0 flex-1"
-            : "aspect-video max-sm:aspect-auto max-sm:min-h-0 max-sm:flex-1"
-        }`}
+        className="relative min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-border bg-surface"
       >
         {url ? (
           broken ? (

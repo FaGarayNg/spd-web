@@ -140,6 +140,11 @@ func (s *Store) RemoveRoomMember(ctx context.Context, roomID, userID uint) error
 		if err != nil {
 			return err
 		}
+		for _, groupID := range groupIds {
+			if err := reassignEncargadoIfNeeded(tx, groupID, userID); err != nil {
+				return err
+			}
+		}
 		if err := tx.Where("user_id = ? AND group_id IN (?)", userID,
 			tx.Unscoped().Model(&group{}).Select("id").Where("room_id = ?", roomID)).Delete(&groupMember{}).Error; err != nil {
 			return err

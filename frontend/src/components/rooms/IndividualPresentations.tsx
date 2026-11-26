@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent } from "react"
 import { uploadPresentation, MAX_UPLOAD_MB } from "../../services/live"
 import { clearMyPresentation, setMyPresentation } from "../../services/rooms"
+import { Icon } from "../ui/Icon"
 import type { Member, UserPresentation } from "../../types"
 import { initials } from "../../utils/initials"
 import { Button } from "../ui/Button"
@@ -14,13 +15,16 @@ type Props = {
   onChanged: () => void
   /** Abre el preview privado de la presentación propia (su UUID distingue cada archivo). */
   onView: (presentationId: string) => void
+  /** El anfitrión puede sacar a cualquier participante de la sala. */
+  canRemove?: boolean
+  onRemove?: (userId: number) => void
   registerItem?: (key: string) => (element: HTMLElement | null) => void
 }
 
 // Cada participante sube su propio PDF/PPTX. El anfitrión arma la sala, define el orden y da el
 // inicio desde "Preparar sala": los participantes no lanzan su presentación desde acá.
 export function IndividualPresentations({
-  roomId, members, currentUserId, presentations, onChanged, onView, registerItem,
+  roomId, members, currentUserId, presentations, onChanged, onView, canRemove, onRemove, registerItem,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -113,6 +117,13 @@ export function IndividualPresentations({
                 <small className="text-ink/60">Lista · {p.slides.length} diapositivas</small>
               ) : (
                 <small className="text-ink/60">Esperando su presentación…</small>
+              )}
+              {canRemove && onRemove && (
+                <button type="button" onClick={() => onRemove(person.id)}
+                  title="Quitar de la sala" aria-label="Quitar de la sala"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink/50 transition-colors hover:bg-red-50 hover:text-red-700">
+                  <Icon name="logout" size={16} />
+                </button>
               )}
             </li>
           )

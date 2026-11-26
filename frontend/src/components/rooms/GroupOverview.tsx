@@ -1,16 +1,20 @@
 import type { ApiPresentation, Group } from "../../types"
 import { initials } from "../../utils/initials"
+import { Icon } from "../ui/Icon"
 
 type Props = {
   groups: Group[]
   /** Presentación asignada a cada grupo, para ver quién ya está listo para exponer. */
   assignments: Record<number, ApiPresentation | null>
+  canRemove?: boolean
+  ownerId?: number
+  onRemove?: (userId: number) => void
   registerItem?: (key: string) => (element: HTMLElement | null) => void
 }
 
 // Vista del anfitrión: ve la grilla armada y quién está en cada grupo. No puede unirse ni cargar.
 // Si un grupo se queda sin integrantes, el backend quita su presentación automáticamente.
-export function GroupOverview({ groups, assignments, registerItem }: Props) {
+export function GroupOverview({ groups, assignments, canRemove, ownerId, onRemove, registerItem }: Props) {
   if (groups.length === 0) {
     return <p className="text-sm text-ink/60">Todavía no armaste ningún grupo.</p>
   }
@@ -39,7 +43,19 @@ export function GroupOverview({ groups, assignments, registerItem }: Props) {
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[10px] font-semibold text-brand-700">
                     {initials(member.fullName)}
                   </span>
-                  <span className="truncate">{member.fullName}</span>
+                  <span className="min-w-0 flex-1 truncate">{member.fullName}</span>
+                  {member.id === group.encargadoId && (
+                    <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
+                      Encargado
+                    </span>
+                  )}
+                  {canRemove && onRemove && member.id !== ownerId && (
+                    <button type="button" onClick={() => onRemove(member.id)}
+                      title="Quitar de la sala" aria-label="Quitar de la sala"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-colors hover:bg-red-50 hover:text-red-700">
+                      <Icon name="logout" size={14} />
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>

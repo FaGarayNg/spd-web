@@ -46,6 +46,7 @@ export type ApiGroup = {
   room_id: number
   limit: number
   priority: number
+  encargado_id: number
   created_at: string
   updated_at: string
 }
@@ -152,5 +153,6 @@ export type Group = {
   id: number
   limit: number
   priority: number
+  encargadoId: number
   members: GroupMember[]
 }

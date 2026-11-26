@@ -214,13 +214,45 @@ func (s *Service) RemovePresentation(ctx context.Context, callerID, groupID uint
 	return s.store.RemovePresentation(ctx, groupID, id)
 }
 
-// isEncargado dice si caller es el primer integrante activo del grupo.
+// isEncargado dice si caller tiene el rol guardado en el grupo (se puede transferir).
 func (s *Service) isEncargado(ctx context.Context, groupID, callerID uint) bool {
-	members, err := s.store.GroupMembers(ctx, groupID)
+	g, err := s.store.GetGroup(ctx, groupID)
 	if err != nil {
 		return false
 	}
-	return len(members) > 0 && members[0].ID == callerID
+	return g.EncargadoID != 0 && g.EncargadoID == callerID
+}
+
+// TransferEncargado pasa el rol a otro integrante. Puede hacerlo el encargado actual o el
+// anfitrión de la sala, y el destinatario debe pertenecer al grupo.
+func (s *Service) TransferEncargado(ctx context.Context, callerID, groupID, newUserID uint) error {
+	if callerID == 0 {
+		return ErrUnauthenticated
+	}
+	g, err := s.store.GetGroup(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	r, err := s.store.GetRoom(ctx, g.RoomID)
+	if err != nil {
+		return err
+	}
+	if g.EncargadoID != callerID && r.OwnerID != callerID {
+		return ErrForbidden
+	}
+	if newUserID == 0 || newUserID == g.EncargadoID {
+		return invalid("elegí otro integrante")
+	}
+	members, err := s.store.GroupMembers(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	for _, m := range members {
+		if m.ID == newUserID {
+			return s.store.SetEncargado(ctx, groupID, newUserID)
+		}
+	}
+	return invalid("ese usuario no integra el grupo")
 }
 
 // checkSlides valida las diapositivas contra el número real de la presentación, que se consulta

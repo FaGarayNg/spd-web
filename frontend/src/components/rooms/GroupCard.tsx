@@ -19,6 +19,8 @@ type Props = {
   /** Solo el anfitrión lanza la presentación del grupo a la sesión en vivo. */
   canPresent?: boolean
   onToggle: () => void
+  /** Pasa el rol de encargado a otro integrante (solo lo ve quien lo tiene). */
+  onTransfer?: (userId: number) => void
   /** Sube el archivo y lo asigna al grupo; rechaza con el mensaje del back si falla. */
   onUpload: (file: File) => Promise<void>
   onUnassign: () => Promise<void>
@@ -37,6 +39,7 @@ export function GroupCard({
   canManage = false,
   canPresent = false,
   onToggle,
+  onTransfer,
   onUpload,
   onUnassign,
   onView,
@@ -45,7 +48,7 @@ export function GroupCard({
   const inputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState("")
   const joined = group.members.some((member) => member.joined)
-  const isEncargado = group.members[0]?.id === currentUserId
+  const isEncargado = group.encargadoId === currentUserId
   const full = !joined && group.members.length >= group.limit
   const assigned = presentation != null
   const freeSlots = Math.max(0, group.limit - group.members.length)
@@ -94,16 +97,24 @@ export function GroupCard({
 
       <div className="flex flex-col gap-2">
         {group.members.length > 0 ? (
-          group.members.map((member, index) => (
+          group.members.map((member) => (
             <div key={member.id} className="flex items-center gap-2 rounded-md px-1 py-1 text-sm">
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-700">
                 {initials(member.fullName)}
               </span>
               <span className="min-w-0 flex-1 truncate">{member.fullName}</span>
-              {index === 0 && (
+              {member.id === group.encargadoId ? (
                 <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">
                   Encargado
                 </span>
+              ) : (
+                isEncargado && onTransfer && (
+                  <button type="button" onClick={() => onTransfer(member.id)}
+                    title="Pasar rol de encargado" aria-label="Pasar rol de encargado"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink/50 transition-colors hover:bg-brand-50 hover:text-brand-700">
+                    <Icon name="edit" size={14} />
+                  </button>
+                )
               )}
             </div>
           ))

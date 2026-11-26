@@ -61,8 +61,8 @@ directamente la lista de integrantes/grupos de la sala, sin una lista propia en 
 guarda en la sala (`PATCH /rooms/:id/order`) para que todos los integrantes vean el mismo orden
 en su próxima actualización. El botón "Ver diapositivas"
 aparece solo para quien integra ese grupo: el preview (metadatos e imágenes) se sirve desde
-`rooms`, que valida la pertenencia; los demás reciben 403 aunque conozcan el UUID. Dentro de cada grupo, solo el
-primer integrante (marcado como "Encargado") ve los botones para cargar y quitar la presentación;
+`rooms`, que valida la pertenencia; los demás reciben 403 aunque conozcan el UUID. Dentro de cada grupo, el integrante marcado como "Encargado" ve los botones para cargar y quitar
+la presentación y puede transferir el rol a otro compañero con un ícono discreto junto a su nombre;
 los demás ven una aclaración. Cada uno puede abrir **"Ver diapositivas"** de su propia
 presentación: el preview individual también es privado y solo lo responde el backend para quien
 la subió. Si el último integrante sale, el backend quita la presentación del

@@ -264,13 +264,14 @@ lo borrado deja de verse en la API, pero sigue en la base de datos.
 | `/api/rooms/:id/order`                           | `PATCH`                  | Guarda el orden de presentación elegido (solo el anfitrión)      |
 | `/api/rooms/:id/access-key`                      | `GET`                    | Clave de ingreso en claro (solo el anfitrión)                    |
 | `/api/rooms/:id/members`                         | `GET`, `POST`            | Miembros (`GET` los lista, ver abajo; `POST` une a uno)         |
-| `/api/rooms/:id/members/:user_id`                | `DELETE`                 | Saca a un usuario de la sala y de sus grupos                    |
+| `/api/rooms/:id/members/:user_id`                | `DELETE`                 | Saca a un usuario de la sala y de sus grupos (uno mismo puede irse; sacar a otro es solo del anfitrión) |
 | `/api/rooms/:id/groups`                          | `GET`, `POST`            | Grupos de la sala, en orden de paso para presentar              |
 | `/api/rooms/:id/live-session`                    | `GET`, `PUT`, `DELETE`   | Sesión en vivo: qué presentación se proyecta en la sala         |
 | `/api/rooms/:id/user-presentations`              | `GET`                    | Presentaciones propias de los participantes (formato individual) |
 | `/api/rooms/:id/my-presentation`                 | `GET`, `POST`, `DELETE`  | Presentación propia del usuario de la sesión                    |
 | `/api/rooms/:id/my-presentation/live`            | `PUT`                    | Publicar la presentación propia en la sesión en vivo            |
 | `/api/groups/:id`                                | `GET`, `PATCH`, `DELETE` | Un grupo (borrarlo borra sus presentaciones e integrantes)      |
+| `/api/groups/:id/encargado`                      | `PATCH`                  | Transfiere el rol de encargado a otro integrante                |
 | `/api/groups/:id/members`                        | `GET`, `POST`            | Integrantes (`GET` los lista, ver abajo; `POST` une a uno)      |
 | `/api/groups/:id/members/:user_id`               | `DELETE`                 | Saca a un usuario del grupo                                     |
 | `/api/groups/:id/presentations`                  | `GET`, `POST`            | Presentaciones asignadas al grupo                               |
@@ -485,7 +486,8 @@ que:
 
 - El servicio borra en cascada él mismo, en una transacción: sala → grupos (con sus
   presentaciones e integrantes) y miembros; grupo → presentaciones e integrantes; usuario →
-  pertenencias a salas y grupos. Quien sale de una sala sale también de sus grupos.
+  pertenencias a salas y grupos. Quien sale de una sala sale también de sus grupos; si era encargado, el rol pasa automáticamente al
+siguiente integrante de cada grupo (o queda vacío si no queda nadie).
 - Cada alta bloquea a su padre con `SELECT … FOR SHARE` hasta terminar. Así, un alta concurrente
   no deja un hijo colgando de un padre recién borrado.
 - El alta de un integrante bloquea el grupo con `FOR UPDATE`: las altas en un grupo pasan de a
