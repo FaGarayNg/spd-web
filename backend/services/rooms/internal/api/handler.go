@@ -1,0 +1,162 @@
+// Package api expone el dominio "salas" por HTTP: usuarios, salas y sus miembros, grupos y sus
+// integrantes, las presentaciones asignadas a cada grupo y la sesión en vivo de la sala.
+package api
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+
+	"spd.web/internal/platform"
+	"spd.web/services/rooms/internal/domain"
+)
+
+// maxBodyBytes acota el cuerpo JSON de las peticiones.
+const maxBodyBytes = 1 << 20
+
+// Handler agrupa los endpoints REST del servicio.
+type Handler struct {
+	svc *domain.Service
+	log *slog.Logger
+	// tokenSecret verifica los JWT de la cabecera Authorization (el mismo con el que los
+	// firma el login; ver main.go, JWT_SECRET).
+	tokenSecret string
+}
+
+// New crea el Handler.
+func New(svc *domain.Service, log *slog.Logger, tokenSecret string) *Handler {
+	return &Handler{svc: svc, log: log, tokenSecret: tokenSecret}
+}
+
+// Register registra las rutas del servicio.
+func (h *Handler) Register(r gin.IRouter) {
+	r.POST("/api/auth/login", h.login)
+	r.GET("/api/users/me", h.me)
+	r.POST("/api/users", h.createUser)
+	r.GET("/api/users", h.listUsers)
+	r.GET("/api/users/:id", h.getUser)
+	r.PATCH("/api/users/:id", h.updateUser)
+	r.DELETE("/api/users/:id", h.deleteUser)
+	r.GET("/api/users/:id/rooms", h.userRooms)
+	r.GET("/api/users/:id/groups", h.userGroups)
+
+	r.POST("/api/rooms", h.createRoom)
+	r.GET("/api/rooms", h.listRooms)
+	r.GET("/api/rooms/:id", h.getRoom)
+	r.PATCH("/api/rooms/:id", h.updateRoom)
+	r.PATCH("/api/rooms/:id/order", h.updateRoomOrder)
+	r.GET("/api/rooms/:id/access-key", h.roomAccessKey)
+	r.DELETE("/api/rooms/:id", h.deleteRoom)
+	r.GET("/api/rooms/:id/members", h.roomMembers)
+	r.POST("/api/rooms/:id/members", h.joinRoom)
+	r.DELETE("/api/rooms/:id/members/:user_id", h.leaveRoom)
+	r.GET("/api/rooms/:id/groups", h.roomGroups)
+	r.POST("/api/rooms/:id/groups", h.createGroup)
+	r.GET("/api/rooms/:id/user-presentations", h.roomUserPresentations)
+	r.GET("/api/rooms/:id/my-presentation", h.getMyPresentation)
+	r.GET("/api/rooms/:id/my-presentation/preview", h.myPresentationPreview)
+	r.GET("/api/rooms/:id/my-presentation/slides/:slide_id", h.myPresentationSlide)
+	r.POST("/api/rooms/:id/my-presentation", h.setMyPresentation)
+	r.DELETE("/api/rooms/:id/my-presentation", h.removeMyPresentation)
+	r.PUT("/api/rooms/:id/my-presentation/live", h.publishMyPresentation)
+	r.GET("/api/rooms/:id/live-session", h.getLiveSession)
+	r.PUT("/api/rooms/:id/live-session", h.setLiveSession)
+	r.DELETE("/api/rooms/:id/live-session", h.clearLiveSession)
+
+	r.GET("/api/groups/:id", h.getGroup)
+	r.PATCH("/api/groups/:id", h.updateGroup)
+	r.DELETE("/api/groups/:id", h.deleteGroup)
+	r.PATCH("/api/groups/:id/encargado", h.transferEncargado)
+	r.GET("/api/groups/:id/members", h.groupMembers)
+	r.POST("/api/groups/:id/members", h.joinGroup)
+	r.DELETE("/api/groups/:id/members/:user_id", h.leaveGroup)
+	r.GET("/api/groups/:id/presentations", h.groupPresentations)
+	r.POST("/api/groups/:id/presentations", h.addPresentation)
+	r.GET("/api/groups/:id/presentations/:presentation_id", h.getPresentation)
+	r.GET("/api/groups/:id/presentations/:presentation_id/preview", h.groupPreview)
+	r.GET("/api/groups/:id/presentations/:presentation_id/slides/:slide_id", h.groupSlide)
+	r.PATCH("/api/groups/:id/presentations/:presentation_id", h.updatePresentation)
+	r.DELETE("/api/groups/:id/presentations/:presentation_id", h.removePresentation)
+}
+
+// idParam lee de la ruta un id numérico (1 o mayor) y, si no lo es, responde 400.
+func idParam(c *gin.Context, name string) (uint, bool) {
+	n, err := strconv.ParseUint(c.Param(name), 10, 63) // 63 bits: el máximo de un bigint
+	if err != nil || n == 0 {
+		platform.WriteError(c, http.StatusBadRequest, name+" inválido")
+		return 0, false
+	}
+	return uint(n), true
+}
+
+// presentationParam lee de la ruta el UUID de una presentación y, si no lo es, responde 400.
+func presentationParam(c *gin.Context) (string, bool) {
+	id, ok := platform.CanonicalUUID(c.Param("presentation_id"))
+	if !ok {
+		platform.WriteError(c, http.StatusBadRequest, "presentation_id inválido")
+	}
+	return id, ok
+}
+
+// bind decodifica el cuerpo JSON en dst y, si no puede, responde 400 (o 413).
+func bind(c *gin.Context, dst any) bool {
+	return platform.BindJSON(c, dst, maxBodyBytes)
+}
+
+// reply responde con v en JSON, o traduce err si lo hay.
+func (h *Handler) reply(c *gin.Context, status int, v any, err error) {
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(status, v)
+}
+
+// noContent responde 204, o traduce err si lo hay.
+func (h *Handler) noContent(c *gin.Context, err error) {
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// fail traduce los errores del dominio a respuestas HTTP. A los 5xx no se les adjunta el
+// detalle (puede contener datos internos): se registra en el log.
+func (h *Handler) fail(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, domain.ErrInvalid):
+		platform.WriteError(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, domain.ErrUnauthenticated), errors.Is(err, domain.ErrWrongCredentials),
+		errors.Is(err, platform.ErrTokenInvalid):
+		platform.WriteError(c, http.StatusUnauthorized, err.Error())
+	case errors.Is(err, domain.ErrForbidden), errors.Is(err, domain.ErrHostCannotPresent):
+		platform.WriteError(c, http.StatusForbidden, err.Error())
+	case errors.Is(err, domain.ErrWrongAccessKey):
+		platform.WriteError(c, http.StatusForbidden, err.Error())
+	case errors.Is(err, domain.ErrUserNotFound), errors.Is(err, domain.ErrRoomNotFound),
+		errors.Is(err, domain.ErrGroupNotFound), errors.Is(err, domain.ErrPresentationNotFound),
+		errors.Is(err, domain.ErrUserPresentationNotFound),
+		errors.Is(err, domain.ErrLiveSessionNotFound),
+		errors.Is(err, domain.ErrNotRoomMember), errors.Is(err, domain.ErrNotGroupMember):
+		platform.WriteError(c, http.StatusNotFound, err.Error())
+	case errors.Is(err, domain.ErrEmailTaken), errors.Is(err, domain.ErrPresentationAssigned),
+		errors.Is(err, domain.ErrRoomMembershipRequired), errors.Is(err, domain.ErrGroupFull),
+		errors.Is(err, domain.ErrLimitBelowMembers):
+		platform.WriteError(c, http.StatusConflict, err.Error())
+	case errors.Is(err, domain.ErrPresentationUnknown):
+		platform.WriteError(c, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, domain.ErrCatalogUnavailable):
+		h.log.Warn("servicio presentations no disponible", "err", err)
+		platform.WriteError(c, http.StatusServiceUnavailable, domain.ErrCatalogUnavailable.Error())
+	case errors.Is(err, context.Canceled):
+		platform.WriteError(c, http.StatusServiceUnavailable, "petición cancelada")
+	default:
+		h.log.Error("error interno", "path", c.Request.URL.Path, "err", err)
+		platform.WriteError(c, http.StatusInternalServerError, "error interno")
+	}
+}
